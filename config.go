@@ -8,11 +8,14 @@ import (
 )
 
 const (
-    configEnvKey = "TASKED_CONF"
-    configDefaultDir = ".tasked"
-    configBaseName = "settings"
+    configEnvKey = "TASKED_CONF"    // environment variable of the tasked config directory path
+    configDefaultDir = ".tasked"    // default directory name for tasked config if environment not set
+    configBaseName = "settings"     // filename of storing general settings inside the config directory
 )
 
+// structure used to parse the general settings from an ini file
+// TODO:
+// - replace the serialization with parsing to a simple map
 type ReadConf struct {
     Aes struct {
         Key string
@@ -20,6 +23,7 @@ type ReadConf struct {
     }
 }
 
+// structure holding general settings
 type config struct {
     aes struct {
         key []byte
@@ -27,8 +31,18 @@ type config struct {
     }
 }
 
+// settings parsed and evaluated on startup
 var cfg *config
 
+// default config values
+func defaultConfig() *config {
+    c := &config{}
+    c.aes.key = []byte("123")
+    c.aes.iv = []byte("456")
+    return c
+}
+
+// makes sure that a directory with a given path exists
 func ensureDir(dir string) error {
     fi, err := os.Stat(dir)
     if os.IsNotExist(err) {
@@ -39,6 +53,8 @@ func ensureDir(dir string) error {
     return err
 }
 
+// makes sure that a directory specified by an environment key exists
+// if the environment variable is empty, pwd/defaultName is used
 func ensureEnvDir(envkey, defaultName string) (string, error) {
     var err error
     dir := os.Getenv(envkey)
@@ -51,13 +67,7 @@ func ensureEnvDir(envkey, defaultName string) (string, error) {
     return dir, err
 }
 
-func defaultConfig() *config {
-    c := &config{}
-    c.aes.key = []byte("123")
-    c.aes.iv = []byte("456")
-    return c
-}
-
+// reads the specified configuration file into to
 func readConfig(fn string, to *config) error {
     rcfg := &ReadConf{}
     err := gcfg.ReadFileInto(rcfg, fn)
@@ -69,6 +79,8 @@ func readConfig(fn string, to *config) error {
     return nil
 }
 
+// initializes the configuration settings
+// override rules of configuration values: default -> config -> startup options
 func initConfig(opt *options) error {
     // any config value can be overridden with options
     // get env for tasked config dir, default pwd/.config
