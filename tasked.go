@@ -1,13 +1,13 @@
 package main
 
 import (
-    "taskedserver.com/repo/tasked/app"
+	"code.google.com/p/tasked/app"
 )
 
 type options struct {
 }
 
 func main() {
-    initConfig(&options{})
-    app.InitSec(cfg.aes.key, cfg.aes.iv)
+	initConfig(&options{})
+	app.InitSec(cfg.aes.key, cfg.aes.iv)
 }
