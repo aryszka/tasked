@@ -3,6 +3,7 @@ package main
 import (
 	"code.google.com/p/gcfg"
 	"errors"
+	"io/ioutil"
 	"os"
 	"path"
 )
@@ -18,8 +19,8 @@ const (
 // - replace the serialization with parsing to a simple map
 type ReadConf struct {
 	Aes struct {
-		Key string
-		Iv  string
+		KeyPath string // path to the file containing the aes key (no line break at the end)
+		IvPath  string // path to the file containing the aes iv (no line break at the end)
 	}
 }
 
@@ -37,8 +38,8 @@ var cfg *config
 // default config values
 func defaultConfig() *config {
 	c := &config{}
-	c.aes.key = []byte("123")
-	c.aes.iv = []byte("456")
+	c.aes.key = []byte("0123456789abcdef")
+	c.aes.iv = []byte("0123456789abcdef")
 	return c
 }
 
@@ -77,8 +78,14 @@ func readConfig(fn string, to *config) error {
 		return err
 	}
 
-	to.aes.key = []byte(rcfg.Aes.Key)
-	to.aes.iv = []byte(rcfg.Aes.Iv)
+	to.aes.key, err = ioutil.ReadFile(rcfg.Aes.KeyPath)
+	if err != nil {
+		return err
+	}
+	to.aes.iv, err = ioutil.ReadFile(rcfg.Aes.IvPath)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

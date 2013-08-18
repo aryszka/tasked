@@ -78,7 +78,7 @@ func TestReadConfig(t *testing.T) {
 		syserr        = "Cannot create test file."
 		configTestDir = "config-test"
 	)
-	withFile := func(fn string, do func(f *os.File) error) error {
+	withFile := func(fn string, do func(*os.File) error) error {
 		f, err := os.Create(fn)
 		if err != nil {
 			return err
@@ -106,9 +106,37 @@ func TestReadConfig(t *testing.T) {
 	fn = path.Join(fn, configBaseName)
 
 	// settings file exists
-	os.RemoveAll(fn)
+	secdir := path.Join(testdir, configTestDir, "sec")
+	err = os.RemoveAll(secdir)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = os.MkdirAll(secdir, os.ModePerm)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	keypath := path.Join(secdir, "aeskey")
+	err = withFile(keypath, func(f *os.File) error {
+		_, err := fmt.Fprintf(f, "abc")
+		return err
+	})
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	ivpath := path.Join(secdir, "aesiv")
+	err = withFile(ivpath, func(f *os.File) error {
+		_, err := fmt.Fprintf(f, "def")
+		return err
+	})
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = os.RemoveAll(fn)
+	if err != nil {
+		t.Fatal(syserr)
+	}
 	err = withFile(fn, func(f *os.File) error {
-		_, err := fmt.Fprintf(f, "[aes]\nkey = abc\niv = def")
+		_, err := fmt.Fprintf(f, "[aes]\nkeypath = %s\nivpath = %s", keypath, ivpath)
 		return err
 	})
 	if err != nil {

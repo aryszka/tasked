@@ -32,7 +32,7 @@ func checkCred(user, pwd string) error {
 
 	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
 		switch style {
-		case pam.PROMPT_ECHO_OFF:
+		case pam.PROMPT_ECHO_OFF, pam.PROMPT_ECHO_ON:
 			return pwd, true
 		default:
 			return "", false
