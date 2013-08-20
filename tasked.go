@@ -9,5 +9,5 @@ type options struct {
 
 func main() {
 	initConfig(&options{})
-	app.InitSec(cfg.aes.key, cfg.aes.iv)
+	app.InitSec(cfg.aes.key, cfg.aes.iv, cfg.auth.tokenValiditySecs)
 }

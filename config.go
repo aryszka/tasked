@@ -16,11 +16,14 @@ const (
 
 // structure used to parse the general settings from an ini file
 // TODO:
-// - replace the serialization with parsing to a simple map
+// - replace the serialization with parsing from/serializing to a simple map
 type ReadConf struct {
 	Aes struct {
 		KeyPath string // path to the file containing the aes key (no line break at the end)
 		IvPath  string // path to the file containing the aes iv (no line break at the end)
+	}
+	Auth struct {
+		TokenValiditySecs int // seconds of validity of the authentication token
 	}
 }
 
@@ -29,6 +32,9 @@ type config struct {
 	aes struct {
 		key []byte
 		iv  []byte
+	}
+	auth struct {
+		tokenValiditySecs int
 	}
 }
 
@@ -40,6 +46,7 @@ func defaultConfig() *config {
 	c := &config{}
 	c.aes.key = []byte("0123456789abcdef")
 	c.aes.iv = []byte("0123456789abcdef")
+	c.auth.tokenValiditySecs = 7776000
 	return c
 }
 
@@ -86,6 +93,7 @@ func readConfig(fn string, to *config) error {
 	if err != nil {
 		return err
 	}
+	to.auth.tokenValiditySecs = rcfg.Auth.TokenValiditySecs
 
 	return nil
 }

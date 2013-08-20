@@ -5,25 +5,31 @@ import (
 	"crypto/cipher"
 	"errors"
 	"github.com/krockot/gopam/pam"
+	"time"
 )
 
-// aes key and iv, valid during the time the application is running
-// update now possible only through restarting the app
-// (if want to update during running, will need to take care about the previously issued keys, too)
-var key, iv []byte
+var (
+	// aes key and iv: valid during the time the application is running
+	// update now possible only through restarting the app
+	// (if want to update during running, will need to take care about the previously issued keys, too)
+	key, iv []byte
+
+	// validity time of the security token in seconds
+	tokenValidity int
+)
 
 // serializable token to serve as an authentication key
-type Token struct {
+type token struct {
 	user  string
 	valid int64
 }
 
-func (t Token) Encrypt() string {
+func (t token) encrypt() string {
 	return ""
 }
 
-func DecryptToken(s string) (Token, error) {
-	return Token{}, nil
+func decryptToken(s string) (token, error) {
+	return token{}, nil
 }
 
 // checks a username and a password if they are valid on the current system
@@ -51,7 +57,7 @@ func checkCred(user, pwd string) error {
 }
 
 // encryption/decryption with AES CTR
-func dencrypt(in []byte) ([]byte, error) {
+func crypt(in []byte) ([]byte, error) {
 	b, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, errors.New("Invalid encryption key.")
@@ -67,11 +73,11 @@ func dencrypt(in []byte) ([]byte, error) {
 // TODO: move out from here into a generic startup health check
 func verifyEncryption() error {
 	test := "Test encryption message."
-	enc, err := dencrypt([]byte(test))
+	enc, err := crypt([]byte(test))
 	if err != nil {
 		return err
 	}
-	dec, err := dencrypt(enc)
+	dec, err := crypt(enc)
 	if err != nil {
 		return err
 	}
@@ -81,10 +87,31 @@ func verifyEncryption() error {
 	return nil
 }
 
+func AuthPwd(user, pwd string) (string, error) {
+	err := checkCred(user, pwd)
+	if err != nil {
+		return "", err
+	}
+
+	// adding square duration :)
+	t := token{user, time.Now().Add(time.Duration(tokenValidity) * time.Second).Unix()}
+	return t.encrypt(), nil
+}
+
+func AuthToken(token string) (string, error) {
+	return "", nil
+}
+
+func GetUser(token string) (string, error) {
+	return "", nil
+}
+
 // security related initialization:
 // - store aes key and iv
-func InitSec(aesKey, aesIv []byte) error {
+// - store token validity time
+func InitSec(aesKey, aesIv []byte, tokenValiditySecs int) error {
 	key = aesKey
 	iv = aesIv
+	tokenValidity = tokenValiditySecs
 	return verifyEncryption()
 }

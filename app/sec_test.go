@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+const testTokenValidity = 5400
+
 func makeKey() ([]byte, error) {
 	s := make([]byte, aes.BlockSize)
 	if _, err := io.ReadFull(rand.Reader, s); err != nil {
@@ -80,13 +82,13 @@ func TestInit(t *testing.T) {
 		t.Fail()
 	}
 
-	if nil != InitSec(key, iv) {
+	if nil != InitSec(key, iv, testTokenValidity) {
 		t.Fail()
 	}
-	if nil == InitSec(nil, iv) {
+	if nil == InitSec(nil, iv, testTokenValidity) {
 		t.Fail()
 	}
-	if nil == InitSec(key[:15], iv[:15]) {
+	if nil == InitSec(key[:15], iv[:15], testTokenValidity) {
 		t.Fail()
 	}
 }

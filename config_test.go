@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"testing"
 )
+
+var testTokenValidity = 1200
 
 func TestEnsureDir(t *testing.T) {
 	const syserr = "Cannot create test file."
@@ -136,17 +139,28 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 	err = withFile(fn, func(f *os.File) error {
-		_, err := fmt.Fprintf(f, "[aes]\nkeypath = %s\nivpath = %s", keypath, ivpath)
-		return err
+		print := func(ft string, args ...interface{}) bool {
+			_, err := fmt.Fprintf(f, ft, args...)
+			return err == nil
+		}
+		if !print("[aes]\n") ||
+			!print("keypath = %s\n", keypath) ||
+			!print("ivpath = %s\n", ivpath) ||
+			!print("[auth]\n") ||
+			!print("tokenvaliditysecs = %d", testTokenValidity) {
+			return errors.New(syserr)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(syserr)
 	}
 
-	cfg = defaultConfig()
+	cfg = new(config)
 	err = readConfig(fn, cfg)
 
 	if err != nil {
+		t.Log(err)
 		t.Fail()
 	}
 	if cfg == nil {
@@ -165,7 +179,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = defaultConfig()
+	cfg = new(config)
 	key, iv := cfg.aes.key, cfg.aes.iv
 	err = readConfig(fn, cfg)
 
@@ -192,7 +206,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = defaultConfig()
+	cfg = new(config)
 	err = readConfig(fn, cfg)
 	if err == nil {
 		t.Fail()
