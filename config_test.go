@@ -156,7 +156,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = new(config)
+	cfg = defaultConfig()
 	err = readConfig(fn, cfg)
 
 	if err != nil {
@@ -179,7 +179,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = new(config)
+	cfg = defaultConfig()
 	key, iv := cfg.aes.key, cfg.aes.iv
 	err = readConfig(fn, cfg)
 
@@ -206,7 +206,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = new(config)
+	cfg = defaultConfig()
 	err = readConfig(fn, cfg)
 	if err == nil {
 		t.Fail()
