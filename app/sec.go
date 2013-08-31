@@ -5,7 +5,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
-	"github.com/krockot/gopam/pam"
+	"code.google.com/p/gopam"
 	"time"
 )
 
