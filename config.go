@@ -29,14 +29,18 @@ type ReadConf struct {
 
 // structure holding general settings
 type config struct {
-	aes struct {
-		key []byte
-		iv  []byte
-	}
-	auth struct {
-		tokenValiditySecs int
+	sec struct {
+		aes struct {
+			key []byte
+			iv  []byte
+		}
+		tokenValidity int
 	}
 }
+
+func (c *config) AesKey() []byte { return c.sec.aes.key }
+func (c *config) AesIv() []byte { return c.sec.aes.iv }
+func (c *config) TokenValidity() int { return c.sec.tokenValidity }
 
 // settings parsed and evaluated on startup
 var cfg *config
@@ -44,9 +48,9 @@ var cfg *config
 // default config values
 func defaultConfig() *config {
 	c := &config{}
-	c.aes.key = []byte("0123456789abcdef")
-	c.aes.iv = []byte("0123456789abcdef")
-	c.auth.tokenValiditySecs = 7776000
+	c.sec.aes.key = []byte("0123456789abcdef")
+	c.sec.aes.iv = []byte("0123456789abcdef")
+	c.sec.tokenValidity = 7776000
 	return c
 }
 
@@ -85,15 +89,15 @@ func readConfig(fn string, to *config) error {
 		return err
 	}
 
-	to.aes.key, err = ioutil.ReadFile(rcfg.Aes.KeyPath)
+	to.sec.aes.key, err = ioutil.ReadFile(rcfg.Aes.KeyPath)
 	if err != nil {
 		return err
 	}
-	to.aes.iv, err = ioutil.ReadFile(rcfg.Aes.IvPath)
+	to.sec.aes.iv, err = ioutil.ReadFile(rcfg.Aes.IvPath)
 	if err != nil {
 		return err
 	}
-	to.auth.tokenValiditySecs = rcfg.Auth.TokenValiditySecs
+	to.sec.tokenValidity = rcfg.Auth.TokenValiditySecs
 
 	return nil
 }

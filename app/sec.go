@@ -5,9 +5,14 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"github.com/krockot/gopam/pam"
 	"time"
+)
+
+const (
+	renewThresholdRate = 0.1
+	invalidTokenMessage = "Invalid token."
+	invalidEncryptionKeyMessage = "Invalid encryption key."
 )
 
 var (
@@ -17,8 +22,15 @@ var (
 	key, iv []byte
 
 	// validity time of the security token in seconds
-	tokenValidity int
+	tokenValidity time.Duration
+	renewThreshold time.Duration
 )
+
+type SecConfig interface {
+	AesKey() []byte
+	AesIv() []byte
+	TokenValidity() int
+}
 
 type Token interface {
 	Value() []byte
@@ -29,6 +41,18 @@ type token struct {
 	user    string
 	created int64
 	val     []byte
+}
+
+func (t *token) Value() []byte {
+	if t.val != nil {
+		return t.val
+	}
+	val, err := encrypt(*t)
+	if err != nil {
+		panic(err)
+	}
+	t.val = val
+	return val
 }
 
 func decryptToken(v []byte) (token, error) {
@@ -45,30 +69,32 @@ func decryptToken(v []byte) (token, error) {
 	return t, nil
 }
 
-func (t token) encrypt() ([]byte, error) {
+func encrypt(t token) ([]byte, error) {
 	b := make([]byte, 8)
 	binary.PutVarint(b, t.created)
 	b = append(b, t.user...)
 	return crypt(b)
 }
 
-func (t token) Value() []byte {
-	if t.val != nil {
-		return t.val
+// same as AuthToken
+func validate(t token) (token, error) {
+	d := time.Now().Sub(time.Unix(t.created, 0))
+	if d > tokenValidity {
+		return t, errors.New(invalidTokenMessage)
 	}
-	val, err := t.encrypt()
-	if err != nil {
-		panic(err)
+	if d < renewThreshold {
+		return t, nil
 	}
-	t.val = val
-	return val
+	t.val = nil
+	t.created = time.Now().Unix()
+	return t, nil
 }
 
 // encryption/decryption with AES CTR
 func crypt(in []byte) ([]byte, error) {
 	b, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, errors.New("Invalid encryption key.")
+		return nil, errors.New(invalidEncryptionKeyMessage)
 	}
 	s := cipher.NewCTR(b, iv)
 	out := make([]byte, len(in))
@@ -76,29 +102,9 @@ func crypt(in []byte) ([]byte, error) {
 	return out, nil
 }
 
-// verify encryption keys by encrypting/decrypting a test datum
-// used on startup
-// TODO: move out from here into a generic startup health check
-func verifyEncryption() error {
-	test := "Test encryption message."
-	enc, err := crypt([]byte(test))
-	if err != nil {
-		return err
-	}
-	dec, err := crypt(enc)
-	if err != nil {
-		return err
-	}
-	if string(dec) != test {
-		errors.New("Failed to initialize encryption.")
-	}
-	return nil
-}
-
 // checks a username and a password if they are valid on the current system
 func checkCred(user, pwd string) error {
 	fail := func() error { return errors.New("Authentication failed.") }
-
 	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
 		switch style {
 		case pam.PROMPT_ECHO_OFF, pam.PROMPT_ECHO_ON:
@@ -119,43 +125,57 @@ func checkCred(user, pwd string) error {
 	return nil
 }
 
+// checks username and password, and if they are
+// not valid credentials, returns error, or a
+// valid security token
 func AuthPwd(user, pwd string) (Token, error) {
+	var t token
 	err := checkCred(user, pwd)
 	if err != nil {
 		return nil, err
 	}
-
-	return token{
-		user: user,
-		// user rather now, and compare later if it is still valid
-		created: time.Now().Add(time.Duration(tokenValidity) * time.Second).Unix()}, nil
+	t.user = user
+	t.created = time.Now().Unix()
+	return &t, nil
 }
 
+// validates a token and returns error if not valid, or
+// returns the token, or if the age of the token is above
+// the threshold, it creates and returns a fresh token
 func AuthToken(t Token) (Token, error) {
-	var (
-		tk  token
-		ok  bool
-		err error
-	)
-	if tk, ok = t.(token); !ok {
-		tk, err = decryptToken(t.Value())
-		if err != nil {
-			return tk, err
-		}
+	if t == nil {
+		return nil, errors.New(invalidTokenMessage)
 	}
-	return tk, nil
+	var (
+		tc *token
+		ok bool
+	)
+	if tc, ok = t.(*token); !ok {
+		return AuthTokenBytes(t.Value())
+	}
+	tn, err := validate(*tc)
+	return &tn, err
 }
 
-func GetUser(t fmt.Stringer) (Token, error) {
-	return token{}, nil
+// same as AuthToken but with the byte representation of a token
+func AuthTokenBytes(v []byte) (Token, error) {
+	t, err := decryptToken(v)
+	if err == nil {
+		t, err = validate(t)
+	}
+	return &t, err
+}
+
+func GetUser(t Token) (string, error) {
+	return "", nil
 }
 
 // security related initialization:
 // - store aes key and iv
 // - store token validity time
-func InitSec(aesKey, aesIv []byte, tokenValiditySecs int) error {
-	key = aesKey
-	iv = aesIv
-	tokenValidity = tokenValiditySecs
-	return verifyEncryption()
+func InitSec(c SecConfig) {
+	key = c.AesKey()
+	iv = c.AesIv()
+	tokenValidity = time.Duration(c.TokenValidity()) * time.Second
+	renewThreshold = time.Duration(float64(tokenValidity) * renewThresholdRate)
 }

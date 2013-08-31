@@ -13,8 +13,5 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
-	err = app.InitSec(cfg.aes.key, cfg.aes.iv, cfg.auth.tokenValiditySecs)
-	if err != nil {
-		os.Exit(1)
-	}
+	app.InitSec(cfg)
 }

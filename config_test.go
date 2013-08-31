@@ -155,10 +155,10 @@ func TestReadConfig(t *testing.T) {
 	if cfg == nil {
 		t.Fail()
 	}
-	if !eqbytes(cfg.aes.key, []byte("abc")) {
+	if !eqbytes(cfg.sec.aes.key, []byte("abc")) {
 		t.Fail()
 	}
-	if !eqbytes(cfg.aes.iv, []byte("def")) {
+	if !eqbytes(cfg.sec.aes.iv, []byte("def")) {
 		t.Fail()
 	}
 
@@ -169,16 +169,16 @@ func TestReadConfig(t *testing.T) {
 	}
 
 	cfg = defaultConfig()
-	key, iv := cfg.aes.key, cfg.aes.iv
+	key, iv := cfg.sec.aes.key, cfg.sec.aes.iv
 	err = readConfig(fn, cfg)
 
 	if !os.IsNotExist(err) {
 		t.Error(err)
 	}
-	if !eqbytes(cfg.aes.key, key) {
+	if !eqbytes(cfg.sec.aes.key, key) {
 		t.Fail()
 	}
-	if !eqbytes(cfg.aes.iv, iv) {
+	if !eqbytes(cfg.sec.aes.iv, iv) {
 		t.Fail()
 	}
 
