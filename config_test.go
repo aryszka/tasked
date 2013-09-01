@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -155,10 +156,10 @@ func TestReadConfig(t *testing.T) {
 	if cfg == nil {
 		t.Fail()
 	}
-	if !eqbytes(cfg.sec.aes.key, []byte("abc")) {
+	if !bytes.Equal(cfg.sec.aes.key, []byte("abc")) {
 		t.Fail()
 	}
-	if !eqbytes(cfg.sec.aes.iv, []byte("def")) {
+	if !bytes.Equal(cfg.sec.aes.iv, []byte("def")) {
 		t.Fail()
 	}
 
@@ -175,10 +176,10 @@ func TestReadConfig(t *testing.T) {
 	if !os.IsNotExist(err) {
 		t.Error(err)
 	}
-	if !eqbytes(cfg.sec.aes.key, key) {
+	if !bytes.Equal(cfg.sec.aes.key, key) {
 		t.Fail()
 	}
-	if !eqbytes(cfg.sec.aes.iv, iv) {
+	if !bytes.Equal(cfg.sec.aes.iv, iv) {
 		t.Fail()
 	}
 

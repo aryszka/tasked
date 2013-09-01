@@ -1,7 +1,7 @@
 package main
 
 import (
-	"code.google.com/p/tasked/app"
+	"code.google.com/p/tasked/sec"
 	"os"
 )
 
@@ -13,5 +13,5 @@ func main() {
 	if err != nil {
 		os.Exit(1)
 	}
-	app.InitSec(cfg)
+	sec.Init(cfg)
 }

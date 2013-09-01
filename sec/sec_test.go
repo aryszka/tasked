@@ -1,6 +1,7 @@
-package app
+package sec
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/rand"
 	"errors"
@@ -69,31 +70,7 @@ func verifyEncryption() error {
 func initTestSec() {
 	key := makeKey()
 	iv := makeKey()
-	InitSec(&testConfig{key, iv, testTokenValidity})
-}
-
-func TestEqbytes(t *testing.T) {
-	if !eqbytes() {
-		t.Fail()
-	}
-	if !eqbytes(nil) {
-		t.Fail()
-	}
-	if !eqbytes(nil, nil) {
-		t.Fail()
-	}
-	if !eqbytes([]byte{1, 2}, []byte{1, 2}) {
-		t.Fail()
-	}
-	if eqbytes([]byte{1, 1}, []byte{1, 2}) {
-		t.Fail()
-	}
-	if !eqbytes([]byte{1, 2}, []byte{1, 2}, []byte{1, 2}) {
-		t.Fail()
-	}
-	if eqbytes([]byte{1, 2}, []byte{1, 1}, []byte{1, 2}) {
-		t.Fail()
-	}
+	Init(&testConfig{key, iv, testTokenValidity})
 }
 
 func TestTokenEncryptDecrypt(t *testing.T) {
@@ -106,7 +83,7 @@ func TestTokenEncryptDecrypt(t *testing.T) {
 	}
 
 	verify, err := decryptToken(v)
-	if err != nil || !eqbytes(verify.val, v) ||
+	if err != nil || !bytes.Equal(verify.val, v) ||
 		verify.user != tk.user || verify.created != tk.created {
 		t.Fail()
 	}
@@ -139,13 +116,13 @@ func TestTokenValue(t *testing.T) {
 
 	tk := token{user: "some", created: 42}
 	val := tk.Value()
-	if val == nil || !eqbytes(tk.val, val) {
+	if val == nil || !bytes.Equal(tk.val, val) {
 		t.Fail()
 	}
 
 	tk = token{user: "some", created: 42}
 	verify, err := encrypt(tk)
-	if err != nil || !eqbytes(val, verify) {
+	if err != nil || !bytes.Equal(val, verify) {
 		t.Fail()
 	}
 }
@@ -216,18 +193,19 @@ func TestValidate(t *testing.T) {
 	tk.Value()
 	tback, err = validate(tk)
 	if err != nil || tback.user != tk.user || tback.created != tk.created ||
-		!eqbytes(tback.val, tk.val) {
+		!bytes.Equal(tback.val, tk.val) {
 		t.Fail()
 	}
 
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 
 	created := time.Now().Add(-time.Second).Unix()
 	tk = token{created: created}
 	val := tk.Value()
 	tk, err = validate(tk)
 	nval := tk.val
-	if err != nil || tk.created != created || !eqbytes(val, tk.Value(), nval) {
+	if err != nil || tk.created != created ||
+		!bytes.Equal(val, tk.Value()) || !bytes.Equal(val, nval) {
 		t.Fail()
 	}
 
@@ -237,7 +215,7 @@ func TestValidate(t *testing.T) {
 	tk, err = validate(tk)
 	nval = tk.val
 	if err != nil || tk.created <= created ||
-		nval != nil || eqbytes(val, tk.Value()) {
+		nval != nil || bytes.Equal(val, tk.Value()) {
 		t.Fail()
 	}
 
@@ -255,7 +233,7 @@ func TestValidateTime(t *testing.T) {
 	if err != nil || !testTime {
 		t.Skip()
 	}
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 
 	created := time.Now().Unix()
 	tk := token{created: created}
@@ -264,7 +242,8 @@ func TestValidateTime(t *testing.T) {
 	time.Sleep(time.Second)
 	tk, err = validate(tk)
 	nval := tk.val
-	if err != nil || tk.created != created || !eqbytes(val, tk.Value(), nval) {
+	if err != nil || tk.created != created ||
+		!bytes.Equal(val, tk.Value()) || !bytes.Equal(val, nval) {
 		t.Fail()
 	}
 
@@ -272,7 +251,7 @@ func TestValidateTime(t *testing.T) {
 	tk, err = validate(tk)
 	nval = tk.val
 	if err != nil || tk.created <= created ||
-		nval != nil || eqbytes(val, tk.Value()) {
+		nval != nil || bytes.Equal(val, tk.Value()) {
 		t.Fail()
 	}
 
@@ -332,7 +311,7 @@ func TestAuthToken(t *testing.T) {
 	tk := &token{created: time.Now().Unix()}
 	tt = &testToken{tk.Value()}
 	tback, err := AuthToken(tt)
-	if err != nil || tback == nil || !eqbytes(tk.Value(), tback.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tk.Value(), tback.Value()) {
 		t.Fail()
 	}
 
@@ -344,7 +323,7 @@ func TestAuthToken(t *testing.T) {
 	}
 
 	tback, err = AuthToken(tk)
-	if err != nil || tback == nil || !eqbytes(tk.Value(), tback.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tk.Value(), tback.Value()) {
 		t.Fail()
 	}
 
@@ -362,16 +341,16 @@ func TestAuthToken(t *testing.T) {
 	}
 	iv = tiv
 
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 	tk = &token{created: time.Now().Add(-time.Second).Unix()}
 	tback, err = AuthToken(tk)
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Add(-2 * time.Second).Unix()}
 	tback, err = AuthToken(tk)
-	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
@@ -387,18 +366,18 @@ func TestAuthTokenTime(t *testing.T) {
 	if err != nil || !testTime {
 		t.Skip()
 	}
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 
 	tk := &token{created: time.Now().Unix()}
 	time.Sleep(time.Second)
 	tback, err := AuthToken(tk)
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	time.Sleep(2 * time.Second)
 	tback, err = AuthToken(tk)
-	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
@@ -432,7 +411,7 @@ func TestAuthBytes(t *testing.T) {
 
 	tk = &token{created: time.Now().Unix()}
 	tback, err := AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
@@ -442,16 +421,16 @@ func TestAuthBytes(t *testing.T) {
 		t.Fail()
 	}
 
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 	tk = &token{created: time.Now().Add(-1 * time.Second).Unix()}
 	tback, err = AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Add(-2 * time.Second).Unix()}
 	tback, err = AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
@@ -467,19 +446,19 @@ func TestAuthBytesTime(t *testing.T) {
 	if err != nil || !testTime {
 		t.Skip()
 	}
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 
 	tk := &token{created: time.Now().Unix()}
 	time.Sleep(time.Second)
 	tback, err := AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Unix()}
 	time.Sleep(2 * time.Second)
 	tback, err = AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
@@ -516,8 +495,6 @@ func TestGetUser(t *testing.T) {
 	if err == nil {
 		t.Fail()
 	}
-
-	InitSec(&testConfig{key, iv, testValidity})
 }
 
 func TestAuthFull(t *testing.T) {
@@ -533,11 +510,11 @@ func TestAuthFull(t *testing.T) {
 		t.Fail()
 	}
 	tback, err := AuthToken(tk)
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	tback, err = AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	userBack, err := GetUser(tk)
@@ -557,27 +534,27 @@ func TestAuthFullTime(t *testing.T) {
 	}
 	user := envdef("TESTUSR", "test")
 	pwd := envdef("TESTPWD", "testpwd")
-	InitSec(&testConfig{key, iv, testValidity})
+	Init(&testConfig{key, iv, testValidity})
 	tk, err := AuthPwd(user, pwd)
 	if err != nil || tk == nil {
 		t.Fail()
 	}
 	time.Sleep(time.Second)
 	tback, err := AuthToken(tk)
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	tback, err = AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	time.Sleep(2 * time.Second)
 	tback, err = AuthToken(tk)
-	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	tback, err = AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	time.Sleep(20 * time.Second)
