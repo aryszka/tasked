@@ -1,17 +1,17 @@
 package app
 
 import (
+	"code.google.com/p/gopam"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
-	"code.google.com/p/gopam"
 	"time"
 )
 
 const (
-	renewThresholdRate = 0.1
-	invalidTokenMessage = "Invalid token."
+	renewThresholdRate          = 0.1
+	invalidTokenMessage         = "Invalid token."
 	invalidEncryptionKeyMessage = "Invalid encryption key."
 )
 
@@ -22,7 +22,7 @@ var (
 	key, iv []byte
 
 	// validity time of the security token in seconds
-	tokenValidity time.Duration
+	tokenValidity  time.Duration
 	renewThreshold time.Duration
 )
 
@@ -55,39 +55,46 @@ func (t *token) Value() []byte {
 	return val
 }
 
+func eqbytes(bs ...[]byte) bool {
+	if len(bs) <= 1 {
+		return true
+	}
+	for i, b := range bs[:len(bs)-1] {
+		bn := bs[i+1]
+		if len(b) != len(bn) {
+			return false
+		}
+		for j, _ := range b {
+			if b[j] != bn[j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func decryptToken(v []byte) (token, error) {
 	t := token{val: v}
 	b, err := crypt(v)
 	if err != nil {
 		return t, err
 	}
-	if len(b) < 8 {
-		return t, nil
+	userPos := len(iv) + 8
+	if len(b) < userPos || !eqbytes(b[:len(iv)], iv) {
+		return t, errors.New(invalidTokenMessage)
 	}
-	t.created, _ = binary.Varint(b[:8])
-	t.user = string(b[8:])
+	t.created, _ = binary.Varint(b[len(iv):userPos])
+	t.user = string(b[userPos:])
 	return t, nil
 }
 
 func encrypt(t token) ([]byte, error) {
-	b := make([]byte, 8)
-	binary.PutVarint(b, t.created)
-	b = append(b, t.user...)
+	cap := len(iv) + 8 + len(t.user)
+	b := make([]byte, cap, cap)
+	copy(b, iv)
+	binary.PutVarint(b[len(iv):], t.created)
+	copy(b[cap-len(t.user):], t.user)
 	return crypt(b)
-}
-
-// same as AuthToken
-func validate(t token) (token, error) {
-	d := time.Now().Sub(time.Unix(t.created, 0))
-	if d > tokenValidity {
-		return t, errors.New(invalidTokenMessage)
-	}
-	if d < renewThreshold {
-		return t, nil
-	}
-	t.val = nil
-	t.created = time.Now().Unix()
-	return t, nil
 }
 
 // encryption/decryption with AES CTR
@@ -123,6 +130,20 @@ func checkCred(user, pwd string) error {
 		return fail()
 	}
 	return nil
+}
+
+// same as AuthToken
+func validate(t token) (token, error) {
+	d := time.Now().Sub(time.Unix(t.created, 0))
+	if d > tokenValidity {
+		return t, errors.New(invalidTokenMessage)
+	}
+	if d < renewThreshold {
+		return t, nil
+	}
+	t.val = nil
+	t.created = time.Now().Unix()
+	return t, nil
 }
 
 // checks username and password, and if they are
@@ -173,9 +194,11 @@ func GetUser(t Token) (string, error) {
 // security related initialization:
 // - store aes key and iv
 // - store token validity time
-func InitSec(c SecConfig) {
+func InitSec(c SecConfig) error {
 	key = c.AesKey()
 	iv = c.AesIv()
 	tokenValidity = time.Duration(c.TokenValidity()) * time.Second
 	renewThreshold = time.Duration(float64(tokenValidity) * renewThresholdRate)
+	var err error
+	return err
 }

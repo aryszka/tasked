@@ -38,8 +38,8 @@ type config struct {
 	}
 }
 
-func (c *config) AesKey() []byte { return c.sec.aes.key }
-func (c *config) AesIv() []byte { return c.sec.aes.iv }
+func (c *config) AesKey() []byte     { return c.sec.aes.key }
+func (c *config) AesIv() []byte      { return c.sec.aes.iv }
 func (c *config) TokenValidity() int { return c.sec.tokenValidity }
 
 // settings parsed and evaluated on startup
