@@ -179,19 +179,19 @@ func TestCheckCred(t *testing.T) {
 	if err != nil || !testAuth {
 		t.Skip()
 	}
-	testusr := envdef("TESTUSR", "test")
-	testpwd := envdef("TESTPWD", "testpwd")
+	user := envdef("TESTUSR", "test")
+	pwd := envdef("TESTPWD", "testpwd")
 
-	if nil != checkCred(testusr, testpwd) {
+	if nil != checkCred(user, pwd) {
 		t.Fail()
 	}
-	if nil == checkCred(testusr+"x", testpwd) {
+	if nil == checkCred(user+"x", pwd) {
 		t.Fail()
 	}
-	if nil == checkCred(testusr, testpwd+"x") {
+	if nil == checkCred(user, pwd+"x") {
 		t.Fail()
 	}
-	if nil == checkCred(testusr, "") {
+	if nil == checkCred(user, "") {
 		t.Fail()
 	}
 	if nil == checkCred("", "") {
@@ -202,18 +202,17 @@ func TestCheckCred(t *testing.T) {
 func TestValidate(t *testing.T) {
 	initTestSec()
 
-	testusr := envdef("TESTUSR", "test")
 	tk := token{}
 	tback, err := validate(tk)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
-	tk = token{user: testusr, created: time.Now().Unix()}
+	tk = token{user: "test", created: time.Now().Unix()}
 	tback, err = validate(tk)
 	if err != nil || tback.user != tk.user || tback.created != tk.created {
 		t.Fail()
 	}
-	tk = token{user: testusr, created: time.Now().Unix()}
+	tk = token{user: "test", created: time.Now().Unix()}
 	tk.Value()
 	tback, err = validate(tk)
 	if err != nil || tback.user != tk.user || tback.created != tk.created ||
@@ -262,7 +261,7 @@ func TestValidateTime(t *testing.T) {
 	tk := token{created: created}
 	val := tk.Value()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	tk, err = validate(tk)
 	nval := tk.val
 	if err != nil || tk.created != created || !eqbytes(val, tk.Value(), nval) {
@@ -291,22 +290,22 @@ func TestAuthPwd(t *testing.T) {
 	if err != nil || !testAuth {
 		t.Skip()
 	}
-	testusr := envdef("TESTUSR", "test")
-	testpwd := envdef("TESTPWD", "testpwd")
+	user := envdef("TESTUSR", "test")
+	pwd := envdef("TESTPWD", "testpwd")
 
-	tk, err := AuthPwd(testusr, testpwd)
+	tk, err := AuthPwd(user, pwd)
 	if err != nil || tk == nil {
 		t.Fail()
 	}
-	_, err = AuthPwd(testusr+"x", testpwd)
+	_, err = AuthPwd(user+"x", pwd)
 	if err == nil {
 		t.Fail()
 	}
-	_, err = AuthPwd(testusr, testpwd+"x")
+	_, err = AuthPwd(user, pwd+"x")
 	if err == nil {
 		t.Fail()
 	}
-	_, err = AuthPwd(testusr, "")
+	_, err = AuthPwd(user, "")
 	if err == nil {
 		t.Fail()
 	}
@@ -364,7 +363,7 @@ func TestAuthToken(t *testing.T) {
 	iv = tiv
 
 	InitSec(&testConfig{key, iv, testValidity})
-	tk = &token{created: time.Now().Add(-1 * time.Second).Unix()}
+	tk = &token{created: time.Now().Add(-time.Second).Unix()}
 	tback, err = AuthToken(tk)
 	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
 		t.Fail()
@@ -391,7 +390,7 @@ func TestAuthTokenTime(t *testing.T) {
 	InitSec(&testConfig{key, iv, testValidity})
 
 	tk := &token{created: time.Now().Unix()}
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	tback, err := AuthToken(tk)
 	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
 		t.Fail()
@@ -469,8 +468,9 @@ func TestAuthBytesTime(t *testing.T) {
 		t.Skip()
 	}
 	InitSec(&testConfig{key, iv, testValidity})
+
 	tk := &token{created: time.Now().Unix()}
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	tback, err := AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
 		t.Fail()
@@ -493,24 +493,100 @@ func TestAuthBytesTime(t *testing.T) {
 
 func TestGetUser(t *testing.T) {
 	initTestSec()
-}
 
-func TestGetUserTime(t *testing.T) {
-	testTime, err := strconv.ParseBool(os.Getenv("TEST_IN_TIME"))
-	if err != nil || !testTime {
-		t.Skip()
+	_, err := GetUser(nil)
+	if err == nil {
+		t.Fail()
 	}
+
+	tk := &token{user: "test"}
+	user, err := GetUser(tk)
+	if err != nil || user != "test" {
+		t.Fail()
+	}
+
+	tt := &testToken{val: tk.Value()}
+	user, err = GetUser(tt)
+	if err != nil || user != "test" {
+		t.Fail()
+	}
+
+	tt = &testToken{val: makeRandom(len(tk.Value()))}
+	_, err = GetUser(tt)
+	if err == nil {
+		t.Fail()
+	}
+
 	InitSec(&testConfig{key, iv, testValidity})
 }
 
-func TestAuthState(t *testing.T) {
+func TestAuthFull(t *testing.T) {
+	testAuth, err := strconv.ParseBool(os.Getenv("AUTH"))
+	if err != nil || !testAuth {
+		t.Skip()
+	}
+	user := envdef("TESTUSR", "test")
+	pwd := envdef("TESTPWD", "testpwd")
 	initTestSec()
+	tk, err := AuthPwd(user, pwd)
+	if err != nil || tk == nil {
+		t.Fail()
+	}
+	tback, err := AuthToken(tk)
+	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	userBack, err := GetUser(tk)
+	if err != nil || userBack != user {
+		t.Fail()
+	}
 }
 
-func TestAuthStateTime(t *testing.T) {
+func TestAuthFullTime(t *testing.T) {
 	testTime, err := strconv.ParseBool(os.Getenv("TEST_IN_TIME"))
 	if err != nil || !testTime {
 		t.Skip()
 	}
+	testAuth, err := strconv.ParseBool(os.Getenv("AUTH"))
+	if err != nil || !testAuth {
+		t.Skip()
+	}
+	user := envdef("TESTUSR", "test")
+	pwd := envdef("TESTPWD", "testpwd")
 	InitSec(&testConfig{key, iv, testValidity})
+	tk, err := AuthPwd(user, pwd)
+	if err != nil || tk == nil {
+		t.Fail()
+	}
+	time.Sleep(time.Second)
+	tback, err := AuthToken(tk)
+	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err != nil || tback == nil || !eqbytes(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	time.Sleep(2 * time.Second)
+	tback, err = AuthToken(tk)
+	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err != nil || tback == nil || eqbytes(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	time.Sleep(20 * time.Second)
+	tback, err = AuthToken(tk)
+	if err == nil {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err == nil {
+		t.Fail()
+	}
 }

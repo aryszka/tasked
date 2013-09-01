@@ -188,7 +188,14 @@ func AuthTokenBytes(v []byte) (Token, error) {
 }
 
 func GetUser(t Token) (string, error) {
-	return "", nil
+	if t == nil {
+		return "", errors.New(invalidTokenMessage)
+	}
+	if tc, ok := t.(*token); ok {
+		return tc.user, nil
+	}
+	tc, err := decryptToken(t.Value())
+	return tc.user, err
 }
 
 // security related initialization:
