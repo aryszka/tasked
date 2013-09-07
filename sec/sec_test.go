@@ -152,12 +152,12 @@ func TestEncryption(t *testing.T) {
 func TestCheckCred(t *testing.T) {
 	initTestSec()
 
-	testAuth, err := strconv.ParseBool(os.Getenv("AUTH"))
+	testAuth, err := strconv.ParseBool(os.Getenv("auth"))
 	if err != nil || !testAuth {
 		t.Skip()
 	}
-	user := envdef("TESTUSR", "test")
-	pwd := envdef("TESTPWD", "testpwd")
+	user := envdef("testusr", "test")
+	pwd := envdef("testpwd", "testpwd")
 
 	if nil != checkCred(user, pwd) {
 		t.Fail()
@@ -229,7 +229,7 @@ func TestValidate(t *testing.T) {
 func TestValidateTime(t *testing.T) {
 	initTestSec()
 
-	testTime, err := strconv.ParseBool(os.Getenv("TEST_IN_TIME"))
+	testTime, err := strconv.ParseBool(os.Getenv("testInTime"))
 	if err != nil || !testTime {
 		t.Skip()
 	}
@@ -265,12 +265,12 @@ func TestValidateTime(t *testing.T) {
 func TestAuthPwd(t *testing.T) {
 	initTestSec()
 
-	testAuth, err := strconv.ParseBool(os.Getenv("AUTH"))
+	testAuth, err := strconv.ParseBool(os.Getenv("auth"))
 	if err != nil || !testAuth {
 		t.Skip()
 	}
-	user := envdef("TESTUSR", "test")
-	pwd := envdef("TESTPWD", "testpwd")
+	user := envdef("testusr", "test")
+	pwd := envdef("testpwd", "testpwd")
 
 	tk, err := AuthPwd(user, pwd)
 	if err != nil || tk == nil {
@@ -362,7 +362,7 @@ func TestAuthToken(t *testing.T) {
 }
 
 func TestAuthTokenTime(t *testing.T) {
-	testTime, err := strconv.ParseBool(os.Getenv("TEST_IN_TIME"))
+	testTime, err := strconv.ParseBool(os.Getenv("testInTime"))
 	if err != nil || !testTime {
 		t.Skip()
 	}
@@ -442,7 +442,7 @@ func TestAuthBytes(t *testing.T) {
 }
 
 func TestAuthBytesTime(t *testing.T) {
-	testTime, err := strconv.ParseBool(os.Getenv("TEST_IN_TIME"))
+	testTime, err := strconv.ParseBool(os.Getenv("testInTime"))
 	if err != nil || !testTime {
 		t.Skip()
 	}
@@ -498,12 +498,12 @@ func TestGetUser(t *testing.T) {
 }
 
 func TestAuthFull(t *testing.T) {
-	testAuth, err := strconv.ParseBool(os.Getenv("AUTH"))
+	testAuth, err := strconv.ParseBool(os.Getenv("auth"))
 	if err != nil || !testAuth {
 		t.Skip()
 	}
-	user := envdef("TESTUSR", "test")
-	pwd := envdef("TESTPWD", "testpwd")
+	user := envdef("testusr", "test")
+	pwd := envdef("testpwd", "testpwd")
 	initTestSec()
 	tk, err := AuthPwd(user, pwd)
 	if err != nil || tk == nil {
@@ -524,16 +524,16 @@ func TestAuthFull(t *testing.T) {
 }
 
 func TestAuthFullTime(t *testing.T) {
-	testTime, err := strconv.ParseBool(os.Getenv("TEST_IN_TIME"))
+	testTime, err := strconv.ParseBool(os.Getenv("testInTime"))
 	if err != nil || !testTime {
 		t.Skip()
 	}
-	testAuth, err := strconv.ParseBool(os.Getenv("AUTH"))
+	testAuth, err := strconv.ParseBool(os.Getenv("auth"))
 	if err != nil || !testAuth {
 		t.Skip()
 	}
-	user := envdef("TESTUSR", "test")
-	pwd := envdef("TESTPWD", "testpwd")
+	user := envdef("testusr", "test")
+	pwd := envdef("testpwd", "testpwd")
 	Init(&testConfig{key, iv, testValidity})
 	tk, err := AuthPwd(user, pwd)
 	if err != nil || tk == nil {

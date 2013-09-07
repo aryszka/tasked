@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	configEnvKey     = "TASKED_CONF" // environment variable of the tasked config directory path
+	configEnvKey     = "taskedconf" // environment variable of the tasked config directory path
 	configDefaultDir = ".tasked"     // default directory name for tasked config if environment not set
 	configBaseName   = "settings"    // filename of storing general settings inside the config directory
 )
@@ -25,6 +25,10 @@ type ReadConf struct {
 	Auth struct {
 		TokenValiditySecs int // seconds of validity of the authentication token
 	}
+	Tls struct {
+		KeyPath string
+		CertPath string
+	}
 }
 
 // structure holding general settings
@@ -35,6 +39,12 @@ type config struct {
 			iv  []byte
 		}
 		tokenValidity int
+	}
+	http struct {
+		tls struct {
+			key []byte
+			cert []byte
+		}
 	}
 }
 
@@ -71,12 +81,18 @@ func ensureEnvDir(envkey, defaultName string) (string, error) {
 	var err error
 	dir := os.Getenv(envkey)
 	if len(dir) == 0 {
+		dir = os.Getenv("HOME")
+		if err != nil {
+			return dir, err
+		}
+	}
+	if len(dir) == 0 {
 		dir, err = os.Getwd()
 		if err != nil {
 			return dir, err
 		}
-		dir = path.Join(dir, defaultName)
 	}
+	dir = path.Join(dir, defaultName)
 	err = ensureDir(dir)
 	return dir, err
 }
@@ -89,15 +105,33 @@ func readConfig(fn string, to *config) error {
 		return err
 	}
 
-	to.sec.aes.key, err = ioutil.ReadFile(rcfg.Aes.KeyPath)
-	if err != nil {
-		return err
+	if len(rcfg.Aes.KeyPath) > 0 {
+		to.sec.aes.key, err = ioutil.ReadFile(rcfg.Aes.KeyPath)
+		if err != nil {
+			return err
+		}
 	}
-	to.sec.aes.iv, err = ioutil.ReadFile(rcfg.Aes.IvPath)
-	if err != nil {
-		return err
+	if len(rcfg.Aes.IvPath) > 0 {
+		to.sec.aes.iv, err = ioutil.ReadFile(rcfg.Aes.IvPath)
+		if err != nil {
+			return err
+		}
 	}
-	to.sec.tokenValidity = rcfg.Auth.TokenValiditySecs
+	if rcfg.Auth.TokenValiditySecs > 0 {
+		to.sec.tokenValidity = rcfg.Auth.TokenValiditySecs
+	}
+	if len(rcfg.Tls.KeyPath) > 0 {
+		to.http.tls.key, err = ioutil.ReadFile(rcfg.Tls.KeyPath)
+		if err != nil {
+			return err
+		}
+	}
+	if len(rcfg.Tls.CertPath) > 0 {
+		to.http.tls.cert, err = ioutil.ReadFile(rcfg.Tls.CertPath)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -115,7 +149,6 @@ func initConfig(opt *options) error {
 	// evaluate options
 
 	cfg = defaultConfig()
-
 	cfgdir, err := ensureEnvDir(configEnvKey, configDefaultDir)
 	err = readConfig(path.Join(cfgdir, configBaseName), cfg)
 	if err != nil && !os.IsNotExist(err) {

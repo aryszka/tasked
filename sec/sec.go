@@ -27,8 +27,8 @@ var (
 	key []byte = []byte("01234567890abcdef")
 	iv  []byte = []byte("01234567890abcdef")
 
-	tokenValidity  time.Duration = 30
-	renewThreshold time.Duration = 3
+	tokenValidity  time.Duration = 30 * time.Second
+	renewThreshold time.Duration = 3 * time.Second
 )
 
 // A type that implements Config can be used to pass initialization values to the package.
@@ -148,7 +148,7 @@ func AuthPwd(user, pwd string) (Token, error) {
 // Validates previously provided tokens if they didn't expire. If not, it
 // returns the same token or a new one with extended expiration, so that a
 // session doesn't expire due to inactivity shorter than 90% of the token
-// validity period.
+// validity interval.
 func AuthToken(t Token) (Token, error) {
 	if t == nil {
 		return nil, errors.New(invalidTokenMessage)
@@ -187,7 +187,7 @@ func GetUser(t Token) (string, error) {
 }
 
 // Initializes sec by setting the key and iv for AES, and setting the token
-// expiration period. The AES key must be set. (The token expiration's default is the quite
+// expiration interval. The AES key must be set. (The token expiration's default is the quite
 // useless value of 30 seconds.)
 //
 // Initialization must happen before the first call to the Auth* methods. Reinitializing with

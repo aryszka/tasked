@@ -65,12 +65,16 @@ func TestEnsureDir(t *testing.T) {
 }
 
 func TestEnsureEnvDir(t *testing.T) {
-	// env set/unset
-
-	const envkey = "TEST_KEY"
+	const envkey = "testkey"
 	tp := path.Join(testdir, "envtest")
 
-	os.Setenv(envkey, tp)
+	orig := os.Getenv(envkey)
+	err := os.Setenv(envkey, tp)
+	if err != nil {
+		t.Fatal()
+	}
+	defer os.Setenv(envkey, orig)
+
 	res, err := ensureEnvDir(envkey, "")
 	if err != nil || res != tp {
 		t.Fail()
@@ -91,6 +95,14 @@ func TestReadConfig(t *testing.T) {
 		return do(f)
 	}
 
+	configEqual := func(left, right *config) bool {
+		return bytes.Equal(left.sec.aes.key, right.sec.aes.key) &&
+			bytes.Equal(left.sec.aes.iv, right.sec.aes.iv) &&
+			left.sec.tokenValidity == right.sec.tokenValidity &&
+			bytes.Equal(left.http.tls.key, right.http.tls.key) &&
+			bytes.Equal(left.http.tls.cert, right.http.tls.cert)
+	}
+
 	fn := path.Join(testdir, configTestDir)
 	err := ensureDir(fn)
 	if err != nil {
@@ -98,7 +110,46 @@ func TestReadConfig(t *testing.T) {
 	}
 	fn = path.Join(fn, configBaseName)
 
+	// settings file doesn't exist
+	err = os.RemoveAll(fn)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+
+	cfg = defaultConfig()
+	verify := defaultConfig()
+	err = readConfig(fn, cfg)
+
+	if !os.IsNotExist(err) || !configEqual(cfg, verify) {
+		t.Log("here")
+		t.Log(os.IsNotExist(err))
+		t.Log(cfg)
+		t.Log(verify)
+		t.Log(configEqual(cfg, verify))
+		t.Fail()
+	}
+
+	// settings file exists, empty
+	err = os.RemoveAll(fn)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = withFile(fn, func(f *os.File) error { return nil })
+	if err != nil {
+		t.Fatal()
+	}
+	cfg = defaultConfig()
+	err = readConfig(fn, cfg)
+	if err != nil || !configEqual(cfg, verify) {
+		t.Fail()
+	}
+
 	// settings file exists
+	err = os.RemoveAll(fn)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+
 	secdir := path.Join(testdir, configTestDir, "sec")
 	err = os.RemoveAll(secdir)
 	if err != nil {
@@ -160,26 +211,6 @@ func TestReadConfig(t *testing.T) {
 		t.Fail()
 	}
 	if !bytes.Equal(cfg.sec.aes.iv, []byte("def")) {
-		t.Fail()
-	}
-
-	// settings file doesn't exist
-	err = os.RemoveAll(fn)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-
-	cfg = defaultConfig()
-	key, iv := cfg.sec.aes.key, cfg.sec.aes.iv
-	err = readConfig(fn, cfg)
-
-	if !os.IsNotExist(err) {
-		t.Error(err)
-	}
-	if !bytes.Equal(cfg.sec.aes.key, key) {
-		t.Fail()
-	}
-	if !bytes.Equal(cfg.sec.aes.iv, iv) {
 		t.Fail()
 	}
 
