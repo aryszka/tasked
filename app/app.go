@@ -1,4 +1,4 @@
-// Package app runs the tasked backend process.
+// Package app runs the http server.
 package app
 
 import (
@@ -12,14 +12,17 @@ const (
 	noTlsWarning = "Tls has not been configured."
 )
 
+// Channel that, if signaled, stops the http server.
 var Stop chan int = make(chan int)
 
+// Interface containing the configuration options accepted by the app package.
 type HttpConfig interface {
 	Address() string
 	TlsKey() []byte
 	TlsCert() []byte
 }
 
+// Read the config or fall back to defaults.
 func readConfig(config HttpConfig) (tlsKey, tlsCert []byte, address string) {
 	tlsKey = []byte(defaultTlsKey)
 	tlsCert = []byte(defaultTlsCert)
@@ -47,6 +50,7 @@ func readConfig(config HttpConfig) (tlsKey, tlsCert []byte, address string) {
 	return tlsKey, tlsCert, address
 }
 
+// Start a TLS wrapped TCP listener.
 func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -62,6 +66,7 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	return l, nil
 }
 
+// Wait for a single stop signal, and start the http server in the background.
 func startStop(l net.Listener) {
 	stopped := false
 	go func() {
@@ -82,6 +87,9 @@ func startStop(l net.Listener) {
 	}()
 }
 
+// Starts a http server that can be stopped by signaling the Stop channel.
+// Within the config, TLS certification and key must be provided. (The hardcoded default serves only testing
+// purpose.)
 func Serve(config HttpConfig) error {
 	tlsKey, tlsCert, address := readConfig(config)
 	l, err := listen(tlsKey, tlsCert, address)

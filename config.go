@@ -14,7 +14,7 @@ const (
 	configBaseName   = "settings"   // filename of storing general settings inside the config directory
 )
 
-// structure used to parse the general settings from an ini file
+// Structure used to parse the general settings from an ini file.
 // TODO:
 // - replace the serialization with parsing from/serializing to a simple map
 type ReadConf struct {
@@ -30,7 +30,7 @@ type ReadConf struct {
 	}
 }
 
-// structure holding general settings
+// Structure holding general settings.
 type config struct {
 	sec struct {
 		aes struct {
@@ -55,10 +55,10 @@ func (c *config) TlsKey() []byte     { return c.http.tls.key }
 func (c *config) TlsCert() []byte    { return c.http.tls.cert }
 func (c *config) Address() string    { return c.http.address }
 
-// settings parsed and evaluated on startup
+// Settings parsed and evaluated on startup.
 var cfg *config
 
-// makes sure that a directory with a given path exists
+// Makes sure that a directory with a given path exists.
 func ensureDir(dir string) error {
 	fi, err := os.Stat(dir)
 	if os.IsNotExist(err) {
@@ -87,7 +87,7 @@ func getConfdir() (string, error) {
 	return path.Join(dir, configDefaultDir), nil
 }
 
-// reads the specified configuration file into to
+// Reads the specified configuration file into 'to'.
 func readConfig(fn string, to *config) error {
 	rcfg := &ReadConf{}
 	err := gcfg.ReadFileInto(rcfg, fn)
@@ -129,8 +129,8 @@ func readConfig(fn string, to *config) error {
 	return nil
 }
 
-// initializes the configuration settings
-// override rules of configuration values: default -> config -> startup options
+// Initializes the configuration settings.
+// Override rules of configuration values: default -> config -> flags.
 func initConfig() error {
 	cfg = &config{}
 	cfgdir, err := getConfdir()
