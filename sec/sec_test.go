@@ -13,9 +13,17 @@ import (
 )
 
 var (
-	testAuth   = *flag.Bool("auth", false, "")
-	testInTime = *flag.Bool("testInTime", false, "")
+	testAuth   = false
+	testInTime = false
 )
+
+func init() {
+	tap := flag.Bool("auth", false, "")
+	ttp := flag.Bool("testInTime", false, "")
+	flag.Parse()
+	testAuth = *tap
+	testInTime = *ttp
+}
 
 type testConfig struct {
 	aesKey        []byte
