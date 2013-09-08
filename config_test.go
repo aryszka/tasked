@@ -9,7 +9,43 @@ import (
 	"testing"
 )
 
-var testTokenValidity = 1200
+const (
+	defaultTestdir      = "test"
+	testdirKey          = "testdata"
+	failedToInitTestdir = "Failed to initialize test directory."
+)
+
+var (
+	testTokenValidity = 1200
+	testdir           = defaultTestdir
+)
+
+func init() {
+	get := func() string {
+		td := os.Getenv(testdirKey)
+		if len(td) > 0 {
+			return td
+		}
+		td = os.Getenv("GOPATH")
+		if len(td) > 0 {
+			return path.Join(td, defaultTestdir)
+		}
+		td = os.Getenv("HOME")
+		if len(td) > 0 {
+			return path.Join(td, defaultTestdir)
+		}
+		td, err := os.Getwd()
+		if err != nil {
+			panic(failedToInitTestdir)
+		}
+		return path.Join(td, defaultTestdir)
+	}
+	testdir = get()
+	err := ensureDir(testdir)
+	if err != nil {
+		panic(failedToInitTestdir)
+	}
+}
 
 func TestEnsureDir(t *testing.T) {
 	const syserr = "Cannot create test file."
@@ -64,21 +100,60 @@ func TestEnsureDir(t *testing.T) {
 	}
 }
 
-func TestEnsureEnvDir(t *testing.T) {
-	const envkey = "testkey"
-	tp := path.Join(testdir, "envtest")
-
-	orig := os.Getenv(envkey)
-	err := os.Setenv(envkey, tp)
+func TestGetConfdir(t *testing.T) {
+	const configTestdir = "config-test"
+	withEnv := func(key, val string, f func() error) error {
+		orig := os.Getenv(key)
+		defer os.Setenv(key, orig)
+		err := os.Setenv(key, val)
+		if err != nil {
+			t.Log(err)
+			return err
+		}
+		return f()
+	}
+	err := withEnv(configEnvKey, configTestdir, func() error {
+		dir, err := getConfdir()
+		if err != nil {
+			return err
+		}
+		if dir != configTestdir {
+			return errors.New("Failed.")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fail()
+	}
+	err = withEnv(configEnvKey, "", func() error {
+		dir, err := getConfdir()
+		if err != nil {
+			return err
+		}
+		if dir != path.Join(os.Getenv("HOME"), configDefaultDir) {
+			return errors.New("Failed.")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fail()
+	}
+	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal()
 	}
-	defer os.Setenv(envkey, orig)
-
-	res, err := ensureEnvDir(envkey, "")
-	if err != nil || res != tp {
-		t.Fail()
-	}
+	err = withEnv(configEnvKey, "", func() error {
+		return withEnv("HOME", "", func() error {
+			dir, err := getConfdir()
+			if err != nil {
+				return err
+			}
+			if dir != path.Join(wd, configDefaultDir) {
+				return errors.New("Failed.")
+			}
+			return nil
+		})
+	})
 }
 
 func TestReadConfig(t *testing.T) {
@@ -100,7 +175,8 @@ func TestReadConfig(t *testing.T) {
 			bytes.Equal(left.sec.aes.iv, right.sec.aes.iv) &&
 			left.sec.tokenValidity == right.sec.tokenValidity &&
 			bytes.Equal(left.http.tls.key, right.http.tls.key) &&
-			bytes.Equal(left.http.tls.cert, right.http.tls.cert)
+			bytes.Equal(left.http.tls.cert, right.http.tls.cert) &&
+			left.http.address == right.http.address
 	}
 
 	fn := path.Join(testdir, configTestDir)
@@ -116,16 +192,11 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = defaultConfig()
-	verify := defaultConfig()
+	cfg = &config{}
+	verify := &config{}
 	err = readConfig(fn, cfg)
 
 	if !os.IsNotExist(err) || !configEqual(cfg, verify) {
-		t.Log("here")
-		t.Log(os.IsNotExist(err))
-		t.Log(cfg)
-		t.Log(verify)
-		t.Log(configEqual(cfg, verify))
 		t.Fail()
 	}
 
@@ -138,7 +209,7 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal()
 	}
-	cfg = defaultConfig()
+	cfg = &config{}
 	err = readConfig(fn, cfg)
 	if err != nil || !configEqual(cfg, verify) {
 		t.Fail()
@@ -150,26 +221,51 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	secdir := path.Join(testdir, configTestDir, "sec")
-	err = os.RemoveAll(secdir)
+	aesdir := path.Join(testdir, configTestDir, "aes")
+	err = os.RemoveAll(aesdir)
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	err = os.MkdirAll(secdir, os.ModePerm)
+	err = os.MkdirAll(aesdir, os.ModePerm)
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	keypath := path.Join(secdir, "aeskey")
-	err = withFile(keypath, func(f *os.File) error {
+	aesKeypath := path.Join(aesdir, "aeskey")
+	err = withFile(aesKeypath, func(f *os.File) error {
 		_, err := fmt.Fprintf(f, "abc")
 		return err
 	})
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	ivpath := path.Join(secdir, "aesiv")
-	err = withFile(ivpath, func(f *os.File) error {
+	aesIvpath := path.Join(aesdir, "aesiv")
+	err = withFile(aesIvpath, func(f *os.File) error {
 		_, err := fmt.Fprintf(f, "def")
+		return err
+	})
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	tlsdir := path.Join(testdir, configTestDir, "tls")
+	err = os.RemoveAll(tlsdir)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = os.MkdirAll(tlsdir, os.ModePerm)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	tlsKeypath := path.Join(tlsdir, "tlskey")
+	err = withFile(tlsKeypath, func(f *os.File) error {
+		_, err := fmt.Fprintf(f, "123")
+		return err
+	})
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	tlsCertpath := path.Join(tlsdir, "tlscert")
+	err = withFile(tlsCertpath, func(f *os.File) error {
+		_, err := fmt.Fprintf(f, "456")
 		return err
 	})
 	if err != nil {
@@ -184,11 +280,14 @@ func TestReadConfig(t *testing.T) {
 			_, err := fmt.Fprintf(f, ft, args...)
 			return err == nil
 		}
-		if !print("[aes]\n") ||
-			!print("keypath = %s\n", keypath) ||
-			!print("ivpath = %s\n", ivpath) ||
-			!print("[auth]\n") ||
-			!print("tokenvaliditysecs = %d", testTokenValidity) {
+		if !(print("[Sec]\n") &&
+			print("aeskeypath = %s\n", aesKeypath) &&
+			print("aesivpath = %s\n", aesIvpath) &&
+			print("tokenvaliditysecs = %d\n", testTokenValidity) &&
+			print("[Http]\n") &&
+			print("tlskeypath = %s\n", tlsKeypath) &&
+			print("tlscertpath = %s\n", tlsCertpath) &&
+			print("address = %s", ":9091")) {
 			return errors.New(syserr)
 		}
 		return nil
@@ -197,7 +296,8 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = defaultConfig()
+	cfg = &config{}
+	t.Log(fn)
 	err = readConfig(fn, cfg)
 
 	if err != nil {
@@ -211,6 +311,15 @@ func TestReadConfig(t *testing.T) {
 		t.Fail()
 	}
 	if !bytes.Equal(cfg.sec.aes.iv, []byte("def")) {
+		t.Fail()
+	}
+	if !bytes.Equal(cfg.http.tls.key, []byte("123")) {
+		t.Fail()
+	}
+	if !bytes.Equal(cfg.http.tls.cert, []byte("456")) {
+		t.Fail()
+	}
+	if cfg.http.address != ":9091" {
 		t.Fail()
 	}
 
@@ -227,7 +336,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = defaultConfig()
+	cfg = &config{}
 	err = readConfig(fn, cfg)
 	if err == nil {
 		t.Fail()
@@ -240,7 +349,7 @@ func TestInitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal("Cannot cleanup test data.")
 	}
-	err = initConfig(&options{})
+	err = initConfig()
 	if err != nil {
 		t.Fail()
 	}

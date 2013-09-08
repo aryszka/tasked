@@ -15,20 +15,20 @@ import (
 )
 
 const (
-	renewThresholdRate          = 0.1
-	invalidTokenMessage         = "Invalid token."
-	invalidEncryptionKeyMessage = "Invalid encryption key."
+	defaultTokenValidity = 7776000
+	renewThresholdRate   = 0.1
+	invalidTokenMessage  = "Invalid token."
 )
 
 var (
 	// aes key and iv: valid during the time the application is running
 	// update now possible only through restarting the app
 	// (if want to update during run time, will need to take care about the previously issued keys, too)
-	key []byte = []byte("01234567890abcdef")
-	iv  []byte = []byte("01234567890abcdef")
+	key []byte = make([]byte, aes.BlockSize)
+	iv  []byte = make([]byte, aes.BlockSize)
 
-	tokenValidity  time.Duration = 30 * time.Second
-	renewThreshold time.Duration = 3 * time.Second
+	tokenValidity  time.Duration = defaultTokenValidity * time.Second
+	renewThreshold time.Duration = time.Duration(float32(defaultTokenValidity)*renewThresholdRate) * time.Second
 )
 
 // A type that implements Config can be used to pass initialization values to the package.
@@ -89,7 +89,7 @@ func encrypt(t token) ([]byte, error) {
 func crypt(in []byte) ([]byte, error) {
 	b, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, errors.New(invalidEncryptionKeyMessage)
+		return nil, err
 	}
 	s := cipher.NewCTR(b, iv)
 	out := make([]byte, len(in))
@@ -187,8 +187,7 @@ func GetUser(t Token) (string, error) {
 }
 
 // Initializes sec by setting the key and iv for AES, and setting the token
-// expiration interval. The AES key must be set. (The token expiration's default is the quite
-// useless value of 30 seconds.)
+// expiration interval. The AES key must be set. (The token expiration's default is 90 days.)
 //
 // Initialization must happen before the first call to the Auth* methods. Reinitializing with
 // new keys will discard previously generated tokens. One process can use one 'instance' of

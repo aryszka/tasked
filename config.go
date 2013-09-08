@@ -9,25 +9,24 @@ import (
 )
 
 const (
+	configDefaultDir = ".tasked"    // default directory name for tasked config if environment not set
 	configEnvKey     = "taskedconf" // environment variable of the tasked config directory path
-	configDefaultDir = ".tasked"     // default directory name for tasked config if environment not set
-	configBaseName   = "settings"    // filename of storing general settings inside the config directory
+	configBaseName   = "settings"   // filename of storing general settings inside the config directory
 )
 
 // structure used to parse the general settings from an ini file
 // TODO:
 // - replace the serialization with parsing from/serializing to a simple map
 type ReadConf struct {
-	Aes struct {
-		KeyPath string // path to the file containing the aes key (no line break at the end)
-		IvPath  string // path to the file containing the aes iv (no line break at the end)
+	Sec struct {
+		AesKeyPath        string // path to the file containing the aes key (no line break at the end)
+		AesIvPath         string // path to the file containing the aes iv (no line break at the end)
+		TokenValiditySecs int    // seconds of validity of the authentication token
 	}
-	Auth struct {
-		TokenValiditySecs int // seconds of validity of the authentication token
-	}
-	Tls struct {
-		KeyPath string
-		CertPath string
+	Http struct {
+		TlsKeyPath  string
+		TlsCertPath string
+		Address     string
 	}
 }
 
@@ -42,27 +41,22 @@ type config struct {
 	}
 	http struct {
 		tls struct {
-			key []byte
+			key  []byte
 			cert []byte
 		}
+		address string
 	}
 }
 
 func (c *config) AesKey() []byte     { return c.sec.aes.key }
 func (c *config) AesIv() []byte      { return c.sec.aes.iv }
 func (c *config) TokenValidity() int { return c.sec.tokenValidity }
+func (c *config) TlsKey() []byte     { return c.http.tls.key }
+func (c *config) TlsCert() []byte    { return c.http.tls.cert }
+func (c *config) Address() string    { return c.http.address }
 
 // settings parsed and evaluated on startup
 var cfg *config
-
-// default config values
-func defaultConfig() *config {
-	c := &config{}
-	c.sec.aes.key = []byte("0123456789abcdef")
-	c.sec.aes.iv = []byte("0123456789abcdef")
-	c.sec.tokenValidity = 7776000
-	return c
-}
 
 // makes sure that a directory with a given path exists
 func ensureDir(dir string) error {
@@ -75,26 +69,22 @@ func ensureDir(dir string) error {
 	return err
 }
 
-// makes sure that a directory specified by an environment key exists
-// if the environment variable is empty, pwd/defaultName is used
-func ensureEnvDir(envkey, defaultName string) (string, error) {
-	var err error
-	dir := os.Getenv(envkey)
-	if len(dir) == 0 {
-		dir = os.Getenv("HOME")
-		if err != nil {
-			return dir, err
-		}
+// Gets the configuration directory specified by 'taskedconf" environment key.
+// If the environment variable is empty, $HOME/.tasked or $(pwd)/.tasked is used.
+func getConfdir() (string, error) {
+	dir := os.Getenv(configEnvKey)
+	if len(dir) > 0 {
+		return dir, nil
 	}
+	dir = os.Getenv("HOME")
 	if len(dir) == 0 {
+		var err error
 		dir, err = os.Getwd()
 		if err != nil {
-			return dir, err
+			return "", err
 		}
 	}
-	dir = path.Join(dir, defaultName)
-	err = ensureDir(dir)
-	return dir, err
+	return path.Join(dir, configDefaultDir), nil
 }
 
 // reads the specified configuration file into to
@@ -105,32 +95,35 @@ func readConfig(fn string, to *config) error {
 		return err
 	}
 
-	if len(rcfg.Aes.KeyPath) > 0 {
-		to.sec.aes.key, err = ioutil.ReadFile(rcfg.Aes.KeyPath)
+	if len(rcfg.Sec.AesKeyPath) > 0 {
+		to.sec.aes.key, err = ioutil.ReadFile(rcfg.Sec.AesKeyPath)
 		if err != nil {
 			return err
 		}
 	}
-	if len(rcfg.Aes.IvPath) > 0 {
-		to.sec.aes.iv, err = ioutil.ReadFile(rcfg.Aes.IvPath)
+	if len(rcfg.Sec.AesIvPath) > 0 {
+		to.sec.aes.iv, err = ioutil.ReadFile(rcfg.Sec.AesIvPath)
 		if err != nil {
 			return err
 		}
 	}
-	if rcfg.Auth.TokenValiditySecs > 0 {
-		to.sec.tokenValidity = rcfg.Auth.TokenValiditySecs
+	if rcfg.Sec.TokenValiditySecs > 0 {
+		to.sec.tokenValidity = rcfg.Sec.TokenValiditySecs
 	}
-	if len(rcfg.Tls.KeyPath) > 0 {
-		to.http.tls.key, err = ioutil.ReadFile(rcfg.Tls.KeyPath)
+	if len(rcfg.Http.TlsKeyPath) > 0 {
+		to.http.tls.key, err = ioutil.ReadFile(rcfg.Http.TlsKeyPath)
 		if err != nil {
 			return err
 		}
 	}
-	if len(rcfg.Tls.CertPath) > 0 {
-		to.http.tls.cert, err = ioutil.ReadFile(rcfg.Tls.CertPath)
+	if len(rcfg.Http.TlsCertPath) > 0 {
+		to.http.tls.cert, err = ioutil.ReadFile(rcfg.Http.TlsCertPath)
 		if err != nil {
 			return err
 		}
+	}
+	if len(rcfg.Http.Address) > 0 {
+		to.http.address = rcfg.Http.Address
 	}
 
 	return nil
@@ -138,18 +131,12 @@ func readConfig(fn string, to *config) error {
 
 // initializes the configuration settings
 // override rules of configuration values: default -> config -> startup options
-func initConfig(opt *options) error {
-	// any config value can be overridden with options
-	// get env for tasked config dir, default pwd/.config
-	// load aes key and iv from configured path, default $config/sec
-	// aes key and iv cannot be overridden with options, only optional path can be given for them
-
-	// evaluate config dir
-	// parse config
-	// evaluate options
-
-	cfg = defaultConfig()
-	cfgdir, err := ensureEnvDir(configEnvKey, configDefaultDir)
+func initConfig() error {
+	cfg = &config{}
+	cfgdir, err := getConfdir()
+	if err != nil {
+		return err
+	}
 	err = readConfig(path.Join(cfgdir, configBaseName), cfg)
 	if err != nil && !os.IsNotExist(err) {
 		return errors.New("Failed to read configuration.")
