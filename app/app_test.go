@@ -3,13 +3,19 @@ package app
 import (
 	"bytes"
 	"crypto/tls"
-	"io/ioutil"
+	"errors"
 	"net/http"
+	"os"
+	"path"
 	"testing"
 )
 
 const (
-	testTlsKey = `-----BEGIN PRIVATE KEY-----
+	failedToInitTestdir = "Failed to initialize test directory."
+	defaultTestdir      = "test"
+	testdirKey          = "testdir"
+	fnbase              = "file"
+	testTlsKey          = `-----BEGIN PRIVATE KEY-----
 MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK5zTQyrShHno1ON
 zPCgwH71S02v+dsKuktLDHmQyJFSm22SAcl/VPT9cQOny7fhNGsZD36y47vuDStk
 DDWdQ6JgdaB4vIgM5lcBIsbAIBzpu72qHY8C1SADc3kh/AJ01uZ0+YT7SdrTFbfQ
@@ -46,6 +52,49 @@ ja5JCKq4V6B3O32gOEhgAdh6OUE4iWYxGhWd3wYUevdyFw==
 -----END CERTIFICATE-----
 `
 )
+
+var testdir = defaultTestdir
+
+// duplicate
+func init() {
+	get := func() string {
+		td := os.Getenv(testdirKey)
+		if len(td) > 0 {
+			return td
+		}
+		td = os.Getenv("GOPATH")
+		if len(td) > 0 {
+			return path.Join(td, defaultTestdir)
+		}
+		td = os.Getenv("HOME")
+		if len(td) > 0 {
+			return path.Join(td, defaultTestdir)
+		}
+		td, err := os.Getwd()
+		if err != nil {
+			panic(failedToInitTestdir)
+		}
+		return path.Join(td, defaultTestdir)
+	}
+	testdir = get()
+	err := ensureDir(testdir)
+	if err != nil {
+		panic(failedToInitTestdir)
+	}
+	fn = path.Join(testdir, fnbase)
+}
+
+// duplicate
+// Makes sure that a directory with a given path exists.
+func ensureDir(dir string) error {
+	fi, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		err = os.MkdirAll(dir, os.ModePerm)
+	} else if err == nil && !fi.IsDir() {
+		err = errors.New("File exists and not a directory.")
+	}
+	return err
+}
 
 type httpTestConfig struct {
 	address string
@@ -86,7 +135,11 @@ func TestReadConfig(t *testing.T) {
 }
 
 func TestServe(t *testing.T) {
-	err := Serve(nil)
+	err := os.Remove(fn)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	err = Serve(nil, fn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,14 +149,14 @@ func TestServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 404 {
 		t.Fail()
 	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		t.Fail()
-	}
-	if !bytes.Equal(body, []byte("hello")) {
-		t.Fail()
-	}
+	// body, err := ioutil.ReadAll(resp.Body)
+	// if err != nil {
+	// 	t.Fail()
+	// }
+	// if !bytes.Equal(body, "hello") {
+	// 	t.Fail()
+	// }
 }

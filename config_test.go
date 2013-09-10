@@ -10,8 +10,6 @@ import (
 )
 
 const (
-	defaultTestdir      = "test"
-	testdirKey          = "testdata"
 	failedToInitTestdir = "Failed to initialize test directory."
 )
 
@@ -20,6 +18,7 @@ var (
 	testdir           = defaultTestdir
 )
 
+// duplicate
 func init() {
 	get := func() string {
 		td := os.Getenv(testdirKey)
@@ -47,71 +46,8 @@ func init() {
 	}
 }
 
-func TestEnsureDir(t *testing.T) {
-	const syserr = "Cannot create test file."
-
-	// exists and directory
-	tp := path.Join(testdir, "some")
-	err := os.RemoveAll(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	err = os.MkdirAll(tp, os.ModePerm)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	err = ensureDir(tp)
-	if err != nil {
-		t.Fail()
-	}
-
-	// exists and not directory
-	err = os.RemoveAll(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	var f *os.File
-	f, err = os.Create(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	f.Close()
-	err = ensureDir(tp)
-	if err == nil {
-		t.Fail()
-	}
-
-	// doesn't exist
-	err = os.RemoveAll(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	err = ensureDir(tp)
-	if err != nil {
-		t.Fail()
-	}
-	var fi os.FileInfo
-	fi, err = os.Stat(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	if !fi.IsDir() {
-		t.Fail()
-	}
-}
-
 func TestGetConfdir(t *testing.T) {
 	const configTestdir = "config-test"
-	withEnv := func(key, val string, f func() error) error {
-		orig := os.Getenv(key)
-		defer os.Setenv(key, orig)
-		err := os.Setenv(key, val)
-		if err != nil {
-			t.Log(err)
-			return err
-		}
-		return f()
-	}
 	err := withEnv(configEnvKey, configTestdir, func() error {
 		dir, err := getConfdir()
 		if err != nil {

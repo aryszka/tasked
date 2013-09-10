@@ -58,17 +58,6 @@ func (c *config) Address() string    { return c.http.address }
 // Settings parsed and evaluated on startup.
 var cfg *config
 
-// Makes sure that a directory with a given path exists.
-func ensureDir(dir string) error {
-	fi, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		err = os.MkdirAll(dir, os.ModePerm)
-	} else if err == nil && !fi.IsDir() {
-		err = errors.New("File exists and not a directory.")
-	}
-	return err
-}
-
 // Gets the configuration directory specified by 'taskedconf" environment key.
 // If the environment variable is empty, $HOME/.tasked or $(pwd)/.tasked is used.
 func getConfdir() (string, error) {

@@ -78,9 +78,7 @@ func startStop(l net.Listener) {
 		}
 	}()
 	go func() {
-		err := http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("hello"))
-		}))
+		err := http.Serve(l, http.HandlerFunc(handler))
 		if _, ok := err.(*net.OpError); err != nil && (!ok && stopped || !stopped) {
 			log.Println(err)
 		}
@@ -90,8 +88,9 @@ func startStop(l net.Listener) {
 // Starts a http server that can be stopped by signaling the Stop channel.
 // Within the config, TLS certification and key must be provided. (The hardcoded default serves only testing
 // purpose.)
-func Serve(config HttpConfig) error {
+func Serve(config HttpConfig, file string) error {
 	tlsKey, tlsCert, address := readConfig(config)
+	fn = file
 	l, err := listen(tlsKey, tlsCert, address)
 	if err != nil {
 		return err
