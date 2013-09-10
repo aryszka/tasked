@@ -51,12 +51,9 @@ type config struct {
 func (c *config) AesKey() []byte     { return c.sec.aes.key }
 func (c *config) AesIv() []byte      { return c.sec.aes.iv }
 func (c *config) TokenValidity() int { return c.sec.tokenValidity }
-func (c *config) TlsKey() []byte     { return c.http.tls.key }
-func (c *config) TlsCert() []byte    { return c.http.tls.cert }
-func (c *config) Address() string    { return c.http.address }
 
 // Settings parsed and evaluated on startup.
-var cfg *config
+var cfg config
 
 // Gets the configuration directory specified by 'taskedconf" environment key.
 // If the environment variable is empty, $HOME/.tasked or $(pwd)/.tasked is used.
@@ -77,7 +74,7 @@ func getConfdir() (string, error) {
 }
 
 // Reads the specified configuration file into 'to'.
-func readConfig(fn string, to *config) error {
+func readConfig(fn string) error {
 	rcfg := &ReadConf{}
 	err := gcfg.ReadFileInto(rcfg, fn)
 	if err != nil {
@@ -85,34 +82,34 @@ func readConfig(fn string, to *config) error {
 	}
 
 	if len(rcfg.Sec.AesKeyPath) > 0 {
-		to.sec.aes.key, err = ioutil.ReadFile(rcfg.Sec.AesKeyPath)
+		cfg.sec.aes.key, err = ioutil.ReadFile(rcfg.Sec.AesKeyPath)
 		if err != nil {
 			return err
 		}
 	}
 	if len(rcfg.Sec.AesIvPath) > 0 {
-		to.sec.aes.iv, err = ioutil.ReadFile(rcfg.Sec.AesIvPath)
+		cfg.sec.aes.iv, err = ioutil.ReadFile(rcfg.Sec.AesIvPath)
 		if err != nil {
 			return err
 		}
 	}
 	if rcfg.Sec.TokenValiditySecs > 0 {
-		to.sec.tokenValidity = rcfg.Sec.TokenValiditySecs
+		cfg.sec.tokenValidity = rcfg.Sec.TokenValiditySecs
 	}
 	if len(rcfg.Http.TlsKeyPath) > 0 {
-		to.http.tls.key, err = ioutil.ReadFile(rcfg.Http.TlsKeyPath)
+		cfg.http.tls.key, err = ioutil.ReadFile(rcfg.Http.TlsKeyPath)
 		if err != nil {
 			return err
 		}
 	}
 	if len(rcfg.Http.TlsCertPath) > 0 {
-		to.http.tls.cert, err = ioutil.ReadFile(rcfg.Http.TlsCertPath)
+		cfg.http.tls.cert, err = ioutil.ReadFile(rcfg.Http.TlsCertPath)
 		if err != nil {
 			return err
 		}
 	}
 	if len(rcfg.Http.Address) > 0 {
-		to.http.address = rcfg.Http.Address
+		cfg.http.address = rcfg.Http.Address
 	}
 
 	return nil
@@ -121,12 +118,11 @@ func readConfig(fn string, to *config) error {
 // Initializes the configuration settings.
 // Override rules of configuration values: default -> config -> flags.
 func initConfig() error {
-	cfg = &config{}
 	cfgdir, err := getConfdir()
 	if err != nil {
 		return err
 	}
-	err = readConfig(path.Join(cfgdir, configBaseName), cfg)
+	err = readConfig(path.Join(cfgdir, configBaseName))
 	if err != nil && !os.IsNotExist(err) {
 		return errors.New("Failed to read configuration.")
 	}

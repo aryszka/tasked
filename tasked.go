@@ -1,7 +1,6 @@
 package main
 
 import (
-	"code.google.com/p/tasked/app"
 	"code.google.com/p/tasked/sec"
 	"errors"
 	"fmt"
@@ -60,13 +59,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	sec.Init(cfg)
+	sec.Init(&cfg)
 
 	dn := getHttpDir()
 	ensureDir(dn)
-	fn := path.Join(dn, fnbase)
+	fn = path.Join(dn, fnbase)
 
-	err = app.Serve(cfg, fn)
+	err = serve()
 	if err != nil {
 		printerrln(err)
 		os.Exit(1)

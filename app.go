@@ -1,5 +1,5 @@
 // Package app runs the http server.
-package app
+package main
 
 import (
 	"crypto/tls"
@@ -13,39 +13,28 @@ const (
 )
 
 // Channel that, if signaled, stops the http server.
-var Stop chan int = make(chan int)
-
-// Interface containing the configuration options accepted by the app package.
-type HttpConfig interface {
-	Address() string
-	TlsKey() []byte
-	TlsCert() []byte
-}
+var stop chan int = make(chan int)
 
 // Read the config or fall back to defaults.
-func readConfig(config HttpConfig) (tlsKey, tlsCert []byte, address string) {
+func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	tlsKey = []byte(defaultTlsKey)
 	tlsCert = []byte(defaultTlsCert)
 	address = defaultAddress
-	if config == nil {
+	tk := cfg.http.tls.key
+	if len(tk) == 0 {
 		log.Println(noTlsWarning)
 	} else {
-		tk := config.TlsKey()
-		if len(tk) == 0 {
-			log.Println(noTlsWarning)
-		} else {
-			tlsKey = tk
-		}
-		tc := config.TlsCert()
-		if len(tc) == 0 {
-			log.Println(noTlsWarning)
-		} else {
-			tlsCert = tc
-		}
-		a := config.Address()
-		if len(a) > 0 {
-			address = a
-		}
+		tlsKey = tk
+	}
+	tc := cfg.http.tls.cert
+	if len(tc) == 0 {
+		log.Println(noTlsWarning)
+	} else {
+		tlsCert = tc
+	}
+	a := cfg.http.address
+	if len(a) > 0 {
+		address = a
 	}
 	return tlsKey, tlsCert, address
 }
@@ -70,7 +59,7 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 func startStop(l net.Listener) {
 	stopped := false
 	go func() {
-		<-Stop
+		<-stop
 		stopped = true
 		err := l.Close()
 		if err != nil {
@@ -88,9 +77,8 @@ func startStop(l net.Listener) {
 // Starts a http server that can be stopped by signaling the Stop channel.
 // Within the config, TLS certification and key must be provided. (The hardcoded default serves only testing
 // purpose.)
-func Serve(config HttpConfig, file string) error {
-	tlsKey, tlsCert, address := readConfig(config)
-	fn = file
+func serve() error {
+	tlsKey, tlsCert, address := readHttpConfig()
 	l, err := listen(tlsKey, tlsCert, address)
 	if err != nil {
 		return err

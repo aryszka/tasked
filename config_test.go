@@ -106,7 +106,7 @@ func TestReadConfig(t *testing.T) {
 		return do(f)
 	}
 
-	configEqual := func(left, right *config) bool {
+	configEqual := func(left, right config) bool {
 		return bytes.Equal(left.sec.aes.key, right.sec.aes.key) &&
 			bytes.Equal(left.sec.aes.iv, right.sec.aes.iv) &&
 			left.sec.tokenValidity == right.sec.tokenValidity &&
@@ -128,9 +128,9 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = &config{}
-	verify := &config{}
-	err = readConfig(fn, cfg)
+	cfg = config{}
+	verify := config{}
+	err = readConfig(fn)
 
 	if !os.IsNotExist(err) || !configEqual(cfg, verify) {
 		t.Fail()
@@ -145,8 +145,8 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal()
 	}
-	cfg = &config{}
-	err = readConfig(fn, cfg)
+	cfg = config{}
+	err = readConfig(fn)
 	if err != nil || !configEqual(cfg, verify) {
 		t.Fail()
 	}
@@ -232,15 +232,12 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = &config{}
+	cfg = config{}
 	t.Log(fn)
-	err = readConfig(fn, cfg)
+	err = readConfig(fn)
 
 	if err != nil {
 		t.Log(err)
-		t.Fail()
-	}
-	if cfg == nil {
 		t.Fail()
 	}
 	if !bytes.Equal(cfg.sec.aes.key, []byte("abc")) {
@@ -272,8 +269,8 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 
-	cfg = &config{}
-	err = readConfig(fn, cfg)
+	cfg = config{}
+	err = readConfig(fn)
 	if err == nil {
 		t.Fail()
 	}

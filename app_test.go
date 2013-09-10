@@ -1,9 +1,8 @@
-package app
+package main
 
 import (
 	"bytes"
 	"crypto/tls"
-	"errors"
 	"net/http"
 	"os"
 	"path"
@@ -11,10 +10,6 @@ import (
 )
 
 const (
-	failedToInitTestdir = "Failed to initialize test directory."
-	defaultTestdir      = "test"
-	testdirKey          = "testdir"
-	fnbase              = "file"
 	testTlsKey          = `-----BEGIN PRIVATE KEY-----
 MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK5zTQyrShHno1ON
 zPCgwH71S02v+dsKuktLDHmQyJFSm22SAcl/VPT9cQOny7fhNGsZD36y47vuDStk
@@ -53,8 +48,6 @@ ja5JCKq4V6B3O32gOEhgAdh6OUE4iWYxGhWd3wYUevdyFw==
 `
 )
 
-var testdir = defaultTestdir
-
 // duplicate
 func init() {
 	get := func() string {
@@ -84,18 +77,6 @@ func init() {
 	fn = path.Join(testdir, fnbase)
 }
 
-// duplicate
-// Makes sure that a directory with a given path exists.
-func ensureDir(dir string) error {
-	fi, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		err = os.MkdirAll(dir, os.ModePerm)
-	} else if err == nil && !fi.IsDir() {
-		err = errors.New("File exists and not a directory.")
-	}
-	return err
-}
-
 type httpTestConfig struct {
 	address string
 	tlsKey  []byte
@@ -113,25 +94,34 @@ func get(url string) (*http.Response, error) {
 				InsecureSkipVerify: true}}}).Get(url)
 }
 
-func TestReadConfig(t *testing.T) {
+func TestReadHttpConfig(t *testing.T) {
+	cfgOrig := cfg
 	dtk, dtc := []byte(defaultTlsKey), []byte(defaultTlsCert)
-	tk, tc, a := readConfig(nil)
+	cfg = config{}
+	tk, tc, a := readHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
 		t.Fail()
 	}
 	vk, vc := []byte(testTlsKey), []byte(testTlsCert)
-	tk, tc, a = readConfig(&httpTestConfig{tlsKey: vk})
+	cfg.http.tls.key = vk
+	tk, tc, a = readHttpConfig()
 	if !bytes.Equal(tk, vk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
 		t.Fail()
 	}
-	tk, tc, a = readConfig(&httpTestConfig{tlsCert: vc})
+	cfg = config{}
+	cfg.http.tls.cert = vc
+	tk, tc, a = readHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, vc) || a != defaultAddress {
+		t.Log("here")
 		t.Fail()
 	}
-	tk, tc, a = readConfig(&httpTestConfig{address: ":8080"})
+	cfg = config{}
+	cfg.http.address = ":8080"
+	tk, tc, a = readHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != ":8080" {
 		t.Fail()
 	}
+	cfg = cfgOrig
 }
 
 func TestServe(t *testing.T) {
@@ -139,11 +129,11 @@ func TestServe(t *testing.T) {
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	err = Serve(nil, fn)
+	err = serve()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func(c chan int) { c <- 0 }(Stop) // ask: how this is
+	defer func(c chan int) { c <- 0 }(stop) // ask: how this is
 	resp, err := get("https://localhost" + defaultAddress)
 	if err != nil {
 		t.Fatal(err)
