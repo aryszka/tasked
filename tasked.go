@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path"
 )
 
@@ -70,7 +69,4 @@ func main() {
 		printerrln(err)
 		os.Exit(1)
 	}
-	sigint := make(chan os.Signal)
-	signal.Notify(sigint, os.Interrupt)
-	<-sigint
 }

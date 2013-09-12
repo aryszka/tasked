@@ -8,12 +8,7 @@ import (
 	"net/http"
 )
 
-const (
-	noTlsWarning = "Tls has not been configured."
-)
-
-// Channel that, if signaled, stops the http server.
-var stop chan int = make(chan int)
+const noTlsWarning = "Tls has not been configured."
 
 // Read the config or fall back to defaults.
 func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
@@ -21,15 +16,14 @@ func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	tlsCert = []byte(defaultTlsCert)
 	address = defaultAddress
 	tk := cfg.http.tls.key
-	if len(tk) == 0 {
+	tc := cfg.http.tls.cert
+	if len(tk) == 0 || len(tc) == 0 {
 		log.Println(noTlsWarning)
-	} else {
+	}
+	if len(tk) > 0 {
 		tlsKey = tk
 	}
-	tc := cfg.http.tls.cert
-	if len(tc) == 0 {
-		log.Println(noTlsWarning)
-	} else {
+	if len(tc) > 0 {
 		tlsCert = tc
 	}
 	a := cfg.http.address
@@ -47,31 +41,16 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	}
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
+		errClose := l.Close()
+		if err != nil {
+			log.Println(errClose)
+		}
 		return nil, err
 	}
 	l = tls.NewListener(l, &tls.Config{
 		NextProtos:   []string{"http/1.1"},
 		Certificates: []tls.Certificate{cert}})
 	return l, nil
-}
-
-// Wait for a single stop signal, and start the http server in the background.
-func startStop(l net.Listener) {
-	stopped := false
-	go func() {
-		<-stop
-		stopped = true
-		err := l.Close()
-		if err != nil {
-			log.Println(err)
-		}
-	}()
-	go func() {
-		err := http.Serve(l, http.HandlerFunc(handler))
-		if _, ok := err.(*net.OpError); err != nil && (!ok && stopped || !stopped) {
-			log.Println(err)
-		}
-	}()
 }
 
 // Starts a http server that can be stopped by signaling the Stop channel.
@@ -83,6 +62,5 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	startStop(l)
-	return nil
+	return http.Serve(l, http.HandlerFunc(handler))
 }

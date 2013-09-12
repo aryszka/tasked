@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"testing"
+	"net"
 )
 
 const (
@@ -96,18 +97,24 @@ func get(url string) (*http.Response, error) {
 
 func TestReadHttpConfig(t *testing.T) {
 	cfgOrig := cfg
+	
+	// default
 	dtk, dtc := []byte(defaultTlsKey), []byte(defaultTlsCert)
 	cfg = config{}
 	tk, tc, a := readHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
 		t.Fail()
 	}
+
+	// set TLS key
 	vk, vc := []byte(testTlsKey), []byte(testTlsCert)
 	cfg.http.tls.key = vk
 	tk, tc, a = readHttpConfig()
 	if !bytes.Equal(tk, vk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
 		t.Fail()
 	}
+
+	// set TLS cert
 	cfg = config{}
 	cfg.http.tls.cert = vc
 	tk, tc, a = readHttpConfig()
@@ -115,38 +122,40 @@ func TestReadHttpConfig(t *testing.T) {
 		t.Log("here")
 		t.Fail()
 	}
+
+	// set address
 	cfg = config{}
 	cfg.http.address = ":8080"
 	tk, tc, a = readHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != ":8080" {
 		t.Fail()
 	}
+
 	cfg = cfgOrig
 }
 
-func TestServe(t *testing.T) {
-	err := os.Remove(fn)
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	err = serve()
+func TestListen(t *testing.T) {
+	// port used
+	ll, err := net.Listen("tcp", ":9191")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal()
 	}
-	defer func(c chan int) { c <- 0 }(stop) // ask: how this is
-	resp, err := get("https://localhost" + defaultAddress)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 404 {
+	defer ll.Close()
+	l, err := listen(nil, nil, ":9191")
+	if err == nil {
 		t.Fail()
 	}
-	// body, err := ioutil.ReadAll(resp.Body)
-	// if err != nil {
-	// 	t.Fail()
-	// }
-	// if !bytes.Equal(body, "hello") {
-	// 	t.Fail()
-	// }
+
+	// invalid TLS
+	l, err = listen(nil, nil, ":9090")
+	if err == nil {
+		t.Fail()
+	}
+
+	// ok
+	l, err = listen([]byte(defaultTlsKey), []byte(defaultTlsCert), defaultAddress)
+	if err != nil {
+		t.Fail()
+	}
+	defer l.Close()
 }
