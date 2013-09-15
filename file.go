@@ -27,12 +27,9 @@ func replyError(w http.ResponseWriter, r *http.Request, err error) bool {
 	return true
 }
 
-func empty(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
+	// todo: OPTIONS, HEAD
 	case "GET":
 		f, err := os.Open(fn)
 		if replyError(w, r, err) {
@@ -54,14 +51,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			replyError(w, r, err)
 			return
 		}
-		empty(w)
 	case "DELETE":
 		err := os.Remove(fn)
 		if replyError(w, r, err) {
 			return
 		}
-		empty(w)
 	default:
+		// todo: should be not supported
 		errorStatus(w, http.StatusNotFound)
 	}
 }

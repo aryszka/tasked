@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/tls"
 	"errors"
 	"io/ioutil"
@@ -9,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"strings"
+	"bytes"
 )
 
 func serveTest(h http.Handler) (*httptest.Server, error) {
@@ -34,6 +35,22 @@ func mkclient() *http.Client {
 
 func get(c *http.Client, url string) (*http.Response, error) { return c.Get(url) }
 
+func checkFile(content []byte) (bool, error) {
+	f, err := os.Open(fn)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	contentDsk, err := ioutil.ReadAll(f)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(contentDsk, content), nil
+}
+
 func testStatusCode(code int, h http.Handler,
 	req func(*http.Client, string) (*http.Response, error), t *testing.T) {
 	server, err := serveTest(h)
@@ -58,19 +75,19 @@ func testGetError(err error, code int, t *testing.T) {
 	}), get, t)
 }
 
-func testGet(body []byte, code int, header http.Header, t *testing.T) {
+func testReq(body []byte, code int, header http.Header,
+	req func(*http.Client, string) (*http.Response, error), t *testing.T) {
 	s, err := serveTest(http.HandlerFunc(handler))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	c := mkclient()
-	rsp, err := c.Get(s.URL)
+	rsp, err := req(c, s.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rsp.StatusCode != code {
-		t.Log(rsp.StatusCode)
 		t.Fail()
 	}
 	for k, vs := range header {
@@ -88,8 +105,6 @@ func testGet(body []byte, code int, header http.Header, t *testing.T) {
 				}
 			}
 			if !found {
-				t.Log(vs)
-				t.Log(vvs)
 				t.Fail()
 				break
 			}
@@ -99,10 +114,26 @@ func testGet(body []byte, code int, header http.Header, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(rspBody, body) {
-		t.Log(string(rspBody))
+	if strings.TrimRight(string(rspBody), "\n\r") != string(body) {
 		t.Fail()
 	}
+}
+
+func testGet(body []byte, code int, header http.Header, t *testing.T) {
+	testReq(body, code, header, func(c *http.Client, url string) (*http.Response, error) {
+		return c.Get(url)
+	}, t)
+}
+
+func testPut(content, body []byte, code int, t *testing.T) {
+	testReq(body, code, nil,
+		func(c *http.Client, url string) (*http.Response, error) {
+		req, err := http.NewRequest("PUT", url, bytes.NewBuffer(content))
+		if err != nil {
+			return nil, err
+		}
+		return c.Do(req)
+	}, t)
 }
 
 func TestReplyError(t *testing.T) {
@@ -130,6 +161,7 @@ func TestGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<8)))
+	defer os.Chmod(fn, os.ModePerm)
 	if err != nil {
 		t.Fatal()
 	}
@@ -164,4 +196,104 @@ func TestGet(t *testing.T) {
 	header = make(map[string][]string)
 	header[http.CanonicalHeaderKey("Last-Modified")] = []string{fs.ModTime().UTC().Format(http.TimeFormat)}
 	testGet(hello, http.StatusOK, header, t)
+}
+
+func TestPut(t *testing.T) {
+	hello := []byte("hello")
+
+	// exists no permission to write
+	err := create(fn)
+	if err != nil {
+		t.Fatal()
+	}
+	func() {
+		err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<7)))
+		defer os.Chmod(fn, os.ModePerm)
+		if err != nil {
+			t.Fatal()
+		}
+		testPut(hello, []byte(http.StatusText(http.StatusUnauthorized)), http.StatusUnauthorized, t)
+		ok, err := checkFile(nil)
+		if err != nil {
+			t.Fatal()
+		} else if !ok {
+			t.Fail()
+		}
+	}()
+
+	// doesn't exist
+	err = os.Remove(fn)
+	if err != nil {
+		t.Fatal()
+	}
+	testPut(hello, nil, http.StatusOK, t)
+	ok, err := checkFile(hello)
+	if err != nil {
+		t.Fatal()
+	} else if !ok {
+		t.Fail()
+	}
+
+	// exists, empty
+	err = create(fn)
+	if err != nil {
+		t.Fatal()
+	}
+	testPut(hello, nil, http.StatusOK, t)
+	ok, err = checkFile(hello)
+	if err != nil {
+		t.Fatal()
+	} else if !ok {
+		t.Fail()
+	}
+
+	// exists, not empty
+	err = withNewFile(fn, func(f *os.File) error {
+		_, err := f.Write([]byte("olleh"))
+		return err
+	})
+	if err != nil {
+		t.Fatal()
+	}
+	testPut(hello, nil, http.StatusOK, t)
+	ok, err = checkFile(hello)
+	if err != nil {
+		t.Fatal()
+	} else if !ok {
+		t.Fail()
+	}
+
+	// POST
+	testReq(nil, http.StatusOK, nil, func(c *http.Client, url string) (*http.Response, error) {
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(hello))
+		if err != nil {
+			return nil, err
+		}
+		return c.Do(req)
+	}, t)
+	ok, err = checkFile(hello)
+	if err != nil {
+		t.Fatal()
+	} else if !ok {
+		t.Fail()
+	}
+}
+
+func TestDelete(t *testing.T) {
+	// exists no permission to write
+	// doesn't exist
+	// exists
+}
+
+func TestNotSupported(t *testing.T) {
+	// TRACE
+	// CONNECT
+	// TINAH
+}
+
+func TestMultipleRequests(t *testing.T) {
+	// start server
+	// get file notfound
+	// put file
+	// get file
 }
