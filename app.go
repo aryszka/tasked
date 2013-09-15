@@ -14,7 +14,6 @@ const noTlsWarning = "Tls has not been configured."
 func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	tlsKey = []byte(defaultTlsKey)
 	tlsCert = []byte(defaultTlsCert)
-	address = defaultAddress
 	tk := cfg.http.tls.key
 	tc := cfg.http.tls.cert
 	if len(tk) == 0 || len(tc) == 0 {
@@ -26,6 +25,7 @@ func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	if len(tc) > 0 {
 		tlsCert = tc
 	}
+	address = defaultAddress
 	a := cfg.http.address
 	if len(a) > 0 {
 		address = a
@@ -42,7 +42,7 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
 		errClose := l.Close()
-		if err != nil {
+		if errClose != nil {
 			log.Println(errClose)
 		}
 		return nil, err

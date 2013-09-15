@@ -2,16 +2,14 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
-	"net/http"
+	"net"
 	"os"
 	"path"
 	"testing"
-	"net"
 )
 
 const (
-	testTlsKey          = `-----BEGIN PRIVATE KEY-----
+	testTlsKey = `-----BEGIN PRIVATE KEY-----
 MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAK5zTQyrShHno1ON
 zPCgwH71S02v+dsKuktLDHmQyJFSm22SAcl/VPT9cQOny7fhNGsZD36y47vuDStk
 DDWdQ6JgdaB4vIgM5lcBIsbAIBzpu72qHY8C1SADc3kh/AJ01uZ0+YT7SdrTFbfQ
@@ -88,16 +86,9 @@ func (tc *httpTestConfig) Address() string { return tc.address }
 func (tc *httpTestConfig) TlsKey() []byte  { return tc.tlsKey }
 func (tc *httpTestConfig) TlsCert() []byte { return tc.tlsCert }
 
-func get(url string) (*http.Response, error) {
-	return (&http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true}}}).Get(url)
-}
-
 func TestReadHttpConfig(t *testing.T) {
 	cfgOrig := cfg
-	
+
 	// default
 	dtk, dtc := []byte(defaultTlsKey), []byte(defaultTlsCert)
 	cfg = config{}
@@ -119,7 +110,6 @@ func TestReadHttpConfig(t *testing.T) {
 	cfg.http.tls.cert = vc
 	tk, tc, a = readHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, vc) || a != defaultAddress {
-		t.Log("here")
 		t.Fail()
 	}
 

@@ -87,7 +87,6 @@ func TestGetHttpDir(t *testing.T) {
 	if err != nil {
 		t.Fail()
 	}
-	t.Log("starting")
 	err = withEnv(testdirKey, "test", func() error {
 		dn := getHttpDir()
 		if dn != "test" {

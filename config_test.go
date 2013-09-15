@@ -97,14 +97,6 @@ func TestReadConfig(t *testing.T) {
 		syserr        = "Cannot create test file."
 		configTestDir = "config-test"
 	)
-	withFile := func(fn string, do func(*os.File) error) error {
-		f, err := os.Create(fn)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		return do(f)
-	}
 
 	configEqual := func(left, right config) bool {
 		return bytes.Equal(left.sec.aes.key, right.sec.aes.key) &&
@@ -141,7 +133,7 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	err = withFile(fn, func(f *os.File) error { return nil })
+	err = create(fn)
 	if err != nil {
 		t.Fatal()
 	}
@@ -167,7 +159,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 	aesKeypath := path.Join(aesdir, "aeskey")
-	err = withFile(aesKeypath, func(f *os.File) error {
+	err = withNewFile(aesKeypath, func(f *os.File) error {
 		_, err := fmt.Fprintf(f, "abc")
 		return err
 	})
@@ -175,7 +167,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 	aesIvpath := path.Join(aesdir, "aesiv")
-	err = withFile(aesIvpath, func(f *os.File) error {
+	err = withNewFile(aesIvpath, func(f *os.File) error {
 		_, err := fmt.Fprintf(f, "def")
 		return err
 	})
@@ -192,7 +184,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 	tlsKeypath := path.Join(tlsdir, "tlskey")
-	err = withFile(tlsKeypath, func(f *os.File) error {
+	err = withNewFile(tlsKeypath, func(f *os.File) error {
 		_, err := fmt.Fprintf(f, "123")
 		return err
 	})
@@ -200,7 +192,7 @@ func TestReadConfig(t *testing.T) {
 		t.Fatal(syserr)
 	}
 	tlsCertpath := path.Join(tlsdir, "tlscert")
-	err = withFile(tlsCertpath, func(f *os.File) error {
+	err = withNewFile(tlsCertpath, func(f *os.File) error {
 		_, err := fmt.Fprintf(f, "456")
 		return err
 	})
@@ -211,7 +203,7 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	err = withFile(fn, func(f *os.File) error {
+	err = withNewFile(fn, func(f *os.File) error {
 		print := func(ft string, args ...interface{}) bool {
 			_, err := fmt.Fprintf(f, ft, args...)
 			return err == nil
@@ -233,11 +225,9 @@ func TestReadConfig(t *testing.T) {
 	}
 
 	cfg = config{}
-	t.Log(fn)
 	err = readConfig(fn)
 
 	if err != nil {
-		t.Log(err)
 		t.Fail()
 	}
 	if !bytes.Equal(cfg.sec.aes.key, []byte("abc")) {
@@ -261,7 +251,7 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	err = withFile(fn, func(f *os.File) error {
+	err = withNewFile(fn, func(f *os.File) error {
 		_, err = fmt.Fprintf(f, "something invalid")
 		return err
 	})
