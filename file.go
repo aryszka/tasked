@@ -52,12 +52,26 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "DELETE":
-		err := os.Remove(fn)
+		fi, err := os.Stat(fn)
+		if os.IsNotExist(err) {
+			return
+		}
+		if replyError(w, r, err) {
+			return
+		}
+		if fi.Mode()&(1<<7) == 0 {
+			replyError(w, r, os.ErrPermission)
+			return
+		}
+		err = os.Remove(fn)
+		if os.IsNotExist(err) {
+			return
+		}
 		if replyError(w, r, err) {
 			return
 		}
 	default:
 		// todo: should be not supported
-		errorStatus(w, http.StatusNotFound)
+		errorStatus(w, http.StatusMethodNotAllowed)
 	}
 }

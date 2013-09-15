@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"testing"
 	"strings"
-	"bytes"
+	"testing"
 )
 
 func serveTest(h http.Handler) (*httptest.Server, error) {
@@ -69,6 +69,17 @@ func testStatusCode(code int, h http.Handler,
 	}
 }
 
+func testMethodNotAllowed(method string, t *testing.T) {
+	testStatusCode(http.StatusMethodNotAllowed, http.HandlerFunc(handler),
+		func(c *http.Client, url string) (*http.Response, error) {
+			req, err := http.NewRequest(method, url, new(bytes.Buffer))
+			if err != nil {
+				return nil, err
+			}
+			return c.Do(req)
+		}, t)
+}
+
 func testGetError(err error, code int, t *testing.T) {
 	testStatusCode(code, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		replyError(w, r, err)
@@ -87,6 +98,7 @@ func testReq(body []byte, code int, header http.Header,
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rsp.Body.Close()
 	if rsp.StatusCode != code {
 		t.Fail()
 	}
@@ -128,12 +140,23 @@ func testGet(body []byte, code int, header http.Header, t *testing.T) {
 func testPut(content, body []byte, code int, t *testing.T) {
 	testReq(body, code, nil,
 		func(c *http.Client, url string) (*http.Response, error) {
-		req, err := http.NewRequest("PUT", url, bytes.NewBuffer(content))
-		if err != nil {
-			return nil, err
-		}
-		return c.Do(req)
-	}, t)
+			req, err := http.NewRequest("PUT", url, bytes.NewBuffer(content))
+			if err != nil {
+				return nil, err
+			}
+			return c.Do(req)
+		}, t)
+}
+
+func testDelete(body []byte, code int, t *testing.T) {
+	testReq(body, code, nil,
+		func(c *http.Client, url string) (*http.Response, error) {
+			req, err := http.NewRequest("DELETE", url, new(bytes.Buffer))
+			if err != nil {
+				return nil, err
+			}
+			return c.Do(req)
+		}, t)
 }
 
 func TestReplyError(t *testing.T) {
@@ -208,15 +231,16 @@ func TestPut(t *testing.T) {
 	}
 	func() {
 		err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<7)))
-		defer os.Chmod(fn, os.ModePerm)
 		if err != nil {
 			t.Fatal()
 		}
+		defer os.Chmod(fn, os.ModePerm)
 		testPut(hello, []byte(http.StatusText(http.StatusUnauthorized)), http.StatusUnauthorized, t)
 		ok, err := checkFile(nil)
 		if err != nil {
 			t.Fatal()
-		} else if !ok {
+		}
+		if !ok {
 			t.Fail()
 		}
 	}()
@@ -230,7 +254,8 @@ func TestPut(t *testing.T) {
 	ok, err := checkFile(hello)
 	if err != nil {
 		t.Fatal()
-	} else if !ok {
+	}
+	if !ok {
 		t.Fail()
 	}
 
@@ -243,7 +268,8 @@ func TestPut(t *testing.T) {
 	ok, err = checkFile(hello)
 	if err != nil {
 		t.Fatal()
-	} else if !ok {
+	}
+	if !ok {
 		t.Fail()
 	}
 
@@ -259,7 +285,8 @@ func TestPut(t *testing.T) {
 	ok, err = checkFile(hello)
 	if err != nil {
 		t.Fatal()
-	} else if !ok {
+	}
+	if !ok {
 		t.Fail()
 	}
 
@@ -274,26 +301,128 @@ func TestPut(t *testing.T) {
 	ok, err = checkFile(hello)
 	if err != nil {
 		t.Fatal()
-	} else if !ok {
+	}
+	if !ok {
 		t.Fail()
 	}
 }
 
 func TestDelete(t *testing.T) {
 	// exists no permission to write
+	err := create(fn)
+	if err != nil {
+		t.Fatal()
+	}
+	func() {
+		err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<7)))
+		if err != nil {
+			t.Fatal()
+		}
+		defer os.Chmod(fn, os.ModePerm)
+		testDelete([]byte(http.StatusText(http.StatusUnauthorized)), http.StatusUnauthorized, t)
+		ok, err := checkFile(nil)
+		if err != nil {
+			t.Fatal()
+		}
+		if !ok {
+			t.Fail()
+		}
+	}()
+
 	// doesn't exist
+	err = os.Remove(fn)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	testDelete(nil, http.StatusOK, t)
+	ok, err := checkFile(nil)
+	if err != nil {
+		t.Fatal()
+	}
+	if ok {
+		t.Fail()
+	}
+
 	// exists
+	err = withNewFile(fn, func(f *os.File) error {
+		_, err := f.Write([]byte("hello"))
+		return err
+	})
+	if err != nil {
+		t.Fatal()
+	}
+	testDelete(nil, http.StatusOK, t)
+	ok, err = checkFile(nil)
+	if err != nil {
+		t.Fatal()
+	}
+	if ok {
+		t.Fail()
+	}
 }
 
 func TestNotSupported(t *testing.T) {
 	// TRACE
+	testMethodNotAllowed("TRACE", t)
+
 	// CONNECT
-	// TINAH
+	testMethodNotAllowed("CONNECT", t)
+
+	// TINAM
+	testMethodNotAllowed("TINAM", t)
 }
 
 func TestMultipleRequests(t *testing.T) {
+	hello := []byte("hello")
+
 	// start server
+	server, err := serveTest(http.HandlerFunc(handler))
+	if err != nil {
+		t.Fatal()
+	}
+	defer server.Close()
+
+	client := mkclient()
+
 	// get file notfound
+	err = os.Remove(fn)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal()
+	}
+	rsp, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatal()
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusNotFound {
+		t.Fail()
+	}
+
 	// put file
+	req, err := http.NewRequest("PUT", server.URL, bytes.NewBuffer(hello))
+	if err != nil {
+		t.Fatal()
+	}
+	rsp, err = client.Do(req)
+	if err != nil {
+		t.Fatal()
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		t.Fail()
+	}
+
 	// get file
+	rsp, err = client.Get(server.URL)
+	if err != nil {
+		t.Fatal()
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		t.Fail()
+	}
+	body, err := ioutil.ReadAll(rsp.Body)
+	if !bytes.Equal(body, hello) {
+		t.Fail()
+	}
 }
