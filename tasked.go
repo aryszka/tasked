@@ -1,6 +1,10 @@
+// Tasked is not yet defined.
+//
+// It uses PAM (Pluggable Authentication Module) to check user credentials.
 package main
 
 import (
+	"code.google.com/p/gopam"
 	"code.google.com/p/tasked/sec"
 	"errors"
 	"fmt"
@@ -51,6 +55,28 @@ func printerrln(e ...interface{}) {
 	}
 }
 
+func authPam(user, pwd string) error {
+	fail := func() error { return errors.New("Authentication failed.") }
+	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
+		switch style {
+		case pam.PROMPT_ECHO_OFF, pam.PROMPT_ECHO_ON:
+			return pwd, true
+		default:
+			return "", false
+		}
+	}))
+	if s != pam.SUCCESS {
+		return fail()
+	}
+	defer t.End(s)
+
+	s = t.Authenticate(0)
+	if s != pam.SUCCESS {
+		return fail()
+	}
+	return nil
+}
+
 func main() {
 	err := initConfig()
 	if err != nil {
@@ -58,7 +84,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	sec.Init(&cfg)
+	err = sec.Init(&cfg, sec.AuthFunc(authPam))
+	if err != nil {
+		printerrln(err)
+		os.Exit(1)
+	}
 
 	dn := getHttpDir()
 	ensureDir(dn)

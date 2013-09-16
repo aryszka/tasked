@@ -82,7 +82,7 @@ func testMethodNotAllowed(method string, t *testing.T) {
 
 func testGetError(err error, code int, t *testing.T) {
 	testStatusCode(code, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		replyError(w, r, err)
+		handleError(w, r, err)
 	}), get, t)
 }
 
@@ -179,7 +179,7 @@ func TestGet(t *testing.T) {
 	testStatusCode(http.StatusNotFound, http.HandlerFunc(handler), get, t)
 
 	// no perm
-	err = create(fn)
+	err = withNewFile(fn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestGet(t *testing.T) {
 	testStatusCode(http.StatusUnauthorized, http.HandlerFunc(handler), get, t)
 
 	// empty
-	err = create(fn)
+	err = withNewFile(fn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestPut(t *testing.T) {
 	hello := []byte("hello")
 
 	// exists no permission to write
-	err := create(fn)
+	err := withNewFile(fn, nil)
 	if err != nil {
 		t.Fatal()
 	}
@@ -260,7 +260,7 @@ func TestPut(t *testing.T) {
 	}
 
 	// exists, empty
-	err = create(fn)
+	err = withNewFile(fn, nil)
 	if err != nil {
 		t.Fatal()
 	}
@@ -309,7 +309,7 @@ func TestPut(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	// exists no permission to write
-	err := create(fn)
+	err := withNewFile(fn, nil)
 	if err != nil {
 		t.Fatal()
 	}
@@ -374,6 +374,7 @@ func TestNotSupported(t *testing.T) {
 
 func TestMultipleRequests(t *testing.T) {
 	hello := []byte("hello")
+	client := mkclient()
 
 	// start server
 	server, err := serveTest(http.HandlerFunc(handler))
@@ -381,8 +382,6 @@ func TestMultipleRequests(t *testing.T) {
 		t.Fatal()
 	}
 	defer server.Close()
-
-	client := mkclient()
 
 	// get file notfound
 	err = os.Remove(fn)

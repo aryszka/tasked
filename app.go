@@ -10,7 +10,8 @@ import (
 
 const noTlsWarning = "Tls has not been configured."
 
-// Read the config or fall back to defaults.
+// Reads and evaluates the http related configuration from cfg.
+// If a value is not defined, falls back to defaults.
 func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	tlsKey = []byte(defaultTlsKey)
 	tlsCert = []byte(defaultTlsCert)
@@ -33,7 +34,7 @@ func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	return tlsKey, tlsCert, address
 }
 
-// Start a TLS wrapped TCP listener.
+// Starts a TLS wrapped TCP listener.
 func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -41,10 +42,7 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	}
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
-		errClose := l.Close()
-		if errClose != nil {
-			log.Println(errClose)
-		}
+		doretlog42(func() error { return l.Close() })
 		return nil, err
 	}
 	l = tls.NewListener(l, &tls.Config{
@@ -53,7 +51,7 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	return l, nil
 }
 
-// Starts a http server that can be stopped by signaling the Stop channel.
+// Starts an HTTP server with the configured settings.
 // Within the config, TLS certification and key must be provided. (The hardcoded default serves only testing
 // purpose.)
 func serve() error {
@@ -62,5 +60,6 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	defer doretlog42(func() error { return l.Close() })
 	return http.Serve(l, http.HandlerFunc(handler))
 }

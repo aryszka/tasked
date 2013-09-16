@@ -6,72 +6,82 @@ import (
 	"os"
 )
 
+// File name used for the single-file http server.
 var fn string
 
-func errorStatus(w http.ResponseWriter, s int) {
+// Writes an error response with a specific status code.
+func errorResponse(w http.ResponseWriter, s int) {
 	http.Error(w, http.StatusText(s), s)
 }
 
-func replyError(w http.ResponseWriter, r *http.Request, err error) bool {
+// Writes an error response according to the given error.
+func handleError(w http.ResponseWriter, r *http.Request, err error) bool {
 	if err == nil {
 		return false
 	}
 	switch {
 	case os.IsNotExist(err):
-		errorStatus(w, http.StatusNotFound)
+		errorResponse(w, http.StatusNotFound)
 	case os.IsPermission(err):
-		errorStatus(w, http.StatusUnauthorized)
+		errorResponse(w, http.StatusUnauthorized)
 	default:
-		errorStatus(w, http.StatusInternalServerError)
+		errorResponse(w, http.StatusInternalServerError)
 	}
 	return true
 }
 
+// Serves a single file for reading and writing.
+// On GET, returns the content of the served file or 404 Not found.
+// On PUT, saves the request body as the content of the served file.
+// On DELETE, deletes the served file. If the file doesn't exist, it
+// doesn't do anything, and returns 200 OK. Delete is not allowed, if
+// the process has no write permission on the served file.
+// If the running process doesn't have permissions for the requested
+// operation, it returns 401 Unauthorized.
+// POST can be used instead of PUT.
+// If the HTTP method is not GET, PUT or POST, then it returns 405
+// Method Not Allowed.
+// For any unexpected, returns 500 Internal Server Error.
 func handler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	// todo: OPTIONS, HEAD
 	case "GET":
 		f, err := os.Open(fn)
-		if replyError(w, r, err) {
+		if handleError(w, r, err) {
 			return
 		}
-		defer f.Close() // todo: err is ignored now, retry later then log and forget
+		defer doretlog42(func() error { return f.Close() })
 		s, err := f.Stat()
-		if replyError(w, r, err) {
+		if handleError(w, r, err) {
 			return
 		}
 		http.ServeContent(w, r, fn, s.ModTime(), f)
-	case "PUT", "POST": // post only for bad clients
+	case "PUT", "POST": // accept post for bad clients
 		f, err := os.Create(fn)
-		if replyError(w, r, err) {
+		if handleError(w, r, err) {
 			return
 		}
+		defer doretlog42(func() error { return f.Close() })
 		_, err = io.Copy(f, r.Body)
-		if err != nil {
-			replyError(w, r, err)
-			return
-		}
+		handleError(w, r, err)
 	case "DELETE":
 		fi, err := os.Stat(fn)
 		if os.IsNotExist(err) {
 			return
 		}
-		if replyError(w, r, err) {
+		if handleError(w, r, err) {
 			return
 		}
 		if fi.Mode()&(1<<7) == 0 {
-			replyError(w, r, os.ErrPermission)
+			errorResponse(w, http.StatusUnauthorized)
 			return
 		}
 		err = os.Remove(fn)
 		if os.IsNotExist(err) {
 			return
 		}
-		if replyError(w, r, err) {
-			return
-		}
+		handleError(w, r, err)
 	default:
-		// todo: should be not supported
-		errorStatus(w, http.StatusMethodNotAllowed)
+		errorResponse(w, http.StatusMethodNotAllowed)
 	}
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"code.google.com/p/gcfg"
-	"errors"
 	"io/ioutil"
 	"os"
 	"path"
@@ -30,7 +29,7 @@ type ReadConf struct {
 	}
 }
 
-// Structure holding general settings.
+// Structure holding application settings.
 type config struct {
 	sec struct {
 		aes struct {
@@ -52,10 +51,10 @@ func (c *config) AesKey() []byte     { return c.sec.aes.key }
 func (c *config) AesIv() []byte      { return c.sec.aes.iv }
 func (c *config) TokenValidity() int { return c.sec.tokenValidity }
 
-// Settings parsed and evaluated on startup.
+// Current settings available for the whole package.
 var cfg config
 
-// Gets the configuration directory specified by 'taskedconf" environment key.
+// Gets the configuration directory specified by the taskedconf environment key.
 // If the environment variable is empty, $HOME/.tasked or $(pwd)/.tasked is used.
 func getConfdir() (string, error) {
 	dir := os.Getenv(configEnvKey)
@@ -73,7 +72,7 @@ func getConfdir() (string, error) {
 	return path.Join(dir, configDefaultDir), nil
 }
 
-// Reads the specified configuration file into 'to'.
+// Reads the specified configuration file into cfg.
 func readConfig(fn string) error {
 	rcfg := &ReadConf{}
 	err := gcfg.ReadFileInto(rcfg, fn)
@@ -115,8 +114,7 @@ func readConfig(fn string) error {
 	return nil
 }
 
-// Initializes the configuration settings.
-// Override rules of configuration values: default -> config -> flags.
+// Initializes the configuration.
 func initConfig() error {
 	cfgdir, err := getConfdir()
 	if err != nil {
@@ -124,7 +122,7 @@ func initConfig() error {
 	}
 	err = readConfig(path.Join(cfgdir, configBaseName))
 	if err != nil && !os.IsNotExist(err) {
-		return errors.New("Failed to read configuration.")
+		return err
 	}
 
 	return nil

@@ -47,7 +47,6 @@ ja5JCKq4V6B3O32gOEhgAdh6OUE4iWYxGhWd3wYUevdyFw==
 `
 )
 
-// duplicate
 func init() {
 	get := func() string {
 		td := os.Getenv(testdirKey)

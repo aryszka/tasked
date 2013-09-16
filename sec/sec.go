@@ -1,12 +1,10 @@
 // Package sec implements a simple authentication scheme. It checks user credentials, and on successful
 // check, it generates an encrypted, time limited token, that can be used for subsequent checks.
 //
-// It uses PAM (Pluggable Authentication Module) to check user credentials.
 package sec
 
 import (
 	"bytes"
-	"code.google.com/p/gopam"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
@@ -29,7 +27,22 @@ var (
 
 	tokenValidity  time.Duration = defaultTokenValidity * time.Second
 	renewThreshold time.Duration = time.Duration(float32(defaultTokenValidity)*renewThresholdRate) * time.Second
+
+	auth Authenticator
 )
+
+// Package sec uses implementations of Authenticator to verify the validity of a username password pair.
+type Authenticator interface {
+	// Returns nil if username and password are valid credentials.
+	Authenticate(username, password string) error
+}
+
+// Wrapper for standalone function implementations of Authenticator.
+type AuthFunc func(string, string) error
+
+func (f AuthFunc) Authenticate(username, password string) error {
+	return f(username, password)
+}
 
 // A type that implements Config can be used to pass initialization values to the package.
 type Config interface {
@@ -97,28 +110,6 @@ func crypt(in []byte) ([]byte, error) {
 	return out, nil
 }
 
-func checkCred(user, pwd string) error {
-	fail := func() error { return errors.New("Authentication failed.") }
-	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
-		switch style {
-		case pam.PROMPT_ECHO_OFF, pam.PROMPT_ECHO_ON:
-			return pwd, true
-		default:
-			return "", false
-		}
-	}))
-	if s != pam.SUCCESS {
-		return fail()
-	}
-	defer t.End(s)
-
-	s = t.Authenticate(0)
-	if s != pam.SUCCESS {
-		return fail()
-	}
-	return nil
-}
-
 func validate(t token) (token, error) {
 	d := time.Now().Sub(time.Unix(t.created, 0))
 	if d > tokenValidity {
@@ -136,7 +127,7 @@ func validate(t token) (token, error) {
 // token is returned, otherwise an error.
 func AuthPwd(user, pwd string) (Token, error) {
 	var t token
-	err := checkCred(user, pwd)
+	err := auth.Authenticate(user, pwd)
 	if err != nil {
 		return nil, err
 	}
@@ -192,9 +183,14 @@ func GetUser(t Token) (string, error) {
 // Initialization must happen before the first call to the Auth* methods. Reinitializing with
 // new keys will discard previously generated tokens. One process can use one 'instance' of
 // the sec package.
-func Init(c Config) {
+func Init(c Config, a Authenticator) error {
+	if a == nil {
+		return errors.New("Authenticator must be defined.")
+	}
+	auth = a
 	key = c.AesKey()
 	iv = c.AesIv()
 	tokenValidity = time.Duration(c.TokenValidity()) * time.Second
 	renewThreshold = time.Duration(float64(tokenValidity) * renewThresholdRate)
+	return nil
 }

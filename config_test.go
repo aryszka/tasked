@@ -133,7 +133,7 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	err = create(fn)
+	err = withNewFile(fn, nil)
 	if err != nil {
 		t.Fatal()
 	}
