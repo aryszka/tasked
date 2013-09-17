@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultTokenValidity = 7776000
+	defaultTokenValidity = 7776000 // 90 days
 	renewThresholdRate   = 0.1
 	invalidTokenMessage  = "Invalid token."
 )
@@ -41,6 +41,7 @@ type Authenticator interface {
 // Wrapper for standalone function implementations of Authenticator.
 type AuthFunc func(string, string) error
 
+// Calls f.
 func (f AuthFunc) Authenticate(username, password string) error {
 	return f(username, password)
 }
@@ -52,7 +53,7 @@ type Config interface {
 	TokenValidity() int // Validity duration of the generated authentication tokens in seconds.
 }
 
-// It can be used to hold the encrypted authentication token.
+// Implementations of Token can be used to hold the encrypted authentication token.
 type Token interface {
 	Value() []byte
 }
@@ -178,8 +179,10 @@ func GetUser(t Token) (string, error) {
 	return tc.user, err
 }
 
-// Initializes sec by setting the key and iv for AES, and setting the token
-// expiration interval. The AES key must be set. (The token expiration's default is 90 days.)
+// Initializes sec by setting the key and iv for AES, and setting the token expiration
+// interval. It expects an implementation of Authenticator, which will be used to check user
+// credentials when AuthPwd is called. The AES key must be set. (The token expiration's
+// default is 90 days.)
 //
 // Initialization must happen before the first call to the Auth* methods. Reinitializing with
 // new keys will discard previously generated tokens. One process can use one 'instance' of

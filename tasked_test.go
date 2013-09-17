@@ -1,14 +1,14 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/rand"
 	"errors"
+	"io"
 	"os"
+	"os/user"
 	"path"
 	"testing"
-	"io"
-	"crypto/rand"
-	"crypto/aes"
-	"os/user"
 )
 
 var isRoot bool

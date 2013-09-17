@@ -36,7 +36,6 @@ func getHttpDir() string {
 	return dn
 }
 
-// duplicate
 // Makes sure that a directory with a given path exists.
 func ensureDir(dir string) error {
 	fi, err := os.Stat(dir)

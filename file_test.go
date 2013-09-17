@@ -175,7 +175,7 @@ func TestGet(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
-	
+
 	// not found
 	err := os.Remove(fn)
 	if err != nil && !os.IsNotExist(err) {
@@ -231,7 +231,7 @@ func TestPut(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
-	
+
 	hello := []byte("hello")
 
 	// exists no permission to write
@@ -322,7 +322,7 @@ func TestDelete(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
-	
+
 	// exists no permission to write
 	err := withNewFile(fn, nil)
 	if err != nil {
@@ -381,7 +381,7 @@ func TestNotSupported(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
-	
+
 	// TRACE
 	testMethodNotAllowed("TRACE", t)
 
@@ -397,7 +397,7 @@ func TestMultipleRequests(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
-	
+
 	hello := []byte("hello")
 	client := mkclient()
 
