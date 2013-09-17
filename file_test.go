@@ -171,6 +171,11 @@ func TestReplyError(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
+	// until custom rights checking, skip these tests, if root
+	if isRoot {
+		t.Skip()
+	}
+	
 	// not found
 	err := os.Remove(fn)
 	if err != nil && !os.IsNotExist(err) {
@@ -222,6 +227,11 @@ func TestGet(t *testing.T) {
 }
 
 func TestPut(t *testing.T) {
+	// until custom rights checking, skip these tests, if root
+	if isRoot {
+		t.Skip()
+	}
+	
 	hello := []byte("hello")
 
 	// exists no permission to write
@@ -308,6 +318,11 @@ func TestPut(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
+	// until custom rights checking, skip these tests, if root
+	if isRoot {
+		t.Skip()
+	}
+	
 	// exists no permission to write
 	err := withNewFile(fn, nil)
 	if err != nil {
@@ -362,6 +377,11 @@ func TestDelete(t *testing.T) {
 }
 
 func TestNotSupported(t *testing.T) {
+	// until custom rights checking, skip these tests, if root
+	if isRoot {
+		t.Skip()
+	}
+	
 	// TRACE
 	testMethodNotAllowed("TRACE", t)
 
@@ -373,6 +393,11 @@ func TestNotSupported(t *testing.T) {
 }
 
 func TestMultipleRequests(t *testing.T) {
+	// until custom rights checking, skip these tests, if root
+	if isRoot {
+		t.Skip()
+	}
+	
 	hello := []byte("hello")
 	client := mkclient()
 

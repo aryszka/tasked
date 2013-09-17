@@ -1,0 +1,9 @@
+Testing
+-------
+
+Test long may fail sometimes because of timing. Rerun. It is tested other ways, too.
+Test pam when root, even if PAM is configured other ways.
+
+
+Workspace
+---------

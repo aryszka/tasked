@@ -1,6 +1,7 @@
 // Package sec implements a simple authentication scheme. It checks user credentials, and on successful
 // check, it generates an encrypted, time limited token, that can be used for subsequent checks.
 //
+// For checking credentials it uses external authenticator, passed during initialization.
 package sec
 
 import (

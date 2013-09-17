@@ -12,12 +12,12 @@ import (
 	"time"
 )
 
-var testInTime = false
+var testLong = false
 
 func init() {
-	ttp := flag.Bool("testInTime", false, "")
+	tl := flag.Bool("test.long", false, "")
 	flag.Parse()
-	testInTime = *ttp
+	testLong = *tl
 }
 
 type testConfig struct {
@@ -54,8 +54,15 @@ func makeRandom(l int) []byte {
 
 func makeKey() []byte { return makeRandom(aes.BlockSize) }
 
+func authFunc(u, p string) error {
+	if len(u) > 0 && u == p {
+		return nil
+	}
+	return errors.New("Authentication failed.")
+}
+
 func resetConfig() {
-	err := Init(&testConfig{makeKey(), makeKey(), 18}, AuthFunc(func(u, p string) error { return nil }))
+	err := Init(&testConfig{makeKey(), makeKey(), 18}, AuthFunc(authFunc))
 	if err != nil {
 		panic("Failed to reset sec config.")
 	}
@@ -214,7 +221,7 @@ func TestValidate(t *testing.T) {
 
 func TestValidateTime(t *testing.T) {
 	resetConfig()
-	if !testInTime {
+	if !testLong {
 		t.Skip()
 	}
 	created := time.Now().Unix()
@@ -311,7 +318,7 @@ func TestAuthToken(t *testing.T) {
 
 func TestAuthTokenTime(t *testing.T) {
 	resetConfig()
-	if !testInTime {
+	if !testLong {
 		t.Skip()
 	}
 
@@ -388,7 +395,7 @@ func TestAuthBytes(t *testing.T) {
 
 func TestAuthBytesTime(t *testing.T) {
 	resetConfig()
-	if !testInTime {
+	if !testLong {
 		t.Skip()
 	}
 
@@ -435,6 +442,76 @@ func TestGetUser(t *testing.T) {
 
 	tt = &testToken{val: makeRandom(len(tk.Value()))}
 	_, err = GetUser(tt)
+	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestAuthPwd(t *testing.T) {
+	resetConfig()
+	tk, err := AuthPwd("c", "c")
+	if err != nil || tk == nil {
+		t.Fail()
+	}
+	_, err = AuthPwd("c", "d")
+	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestAuthFull(t *testing.T) {
+	resetConfig()
+	tk, err := AuthPwd("cred", "cred")
+	if err != nil || tk == nil {
+		t.Fail()
+	}
+	tback, err := AuthToken(tk)
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	userBack, err := GetUser(tk)
+	if err != nil || userBack != "cred" {
+		t.Fail()
+	}
+}
+
+func TestAuthFullTime(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+	resetConfig()
+	tk, err := AuthPwd("c", "c")
+	if err != nil || tk == nil {
+		t.Fail()
+	}
+	time.Sleep(time.Second)
+	tback, err := AuthToken(tk)
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	time.Sleep(2 * time.Second)
+	tback, err = AuthToken(tk)
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
+	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
+		t.Fail()
+	}
+	time.Sleep(20 * time.Second)
+	tback, err = AuthToken(tk)
+	if err == nil {
+		t.Fail()
+	}
+	tback, err = AuthTokenBytes(tk.Value())
 	if err == nil {
 		t.Fail()
 	}

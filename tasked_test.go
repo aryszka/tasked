@@ -1,27 +1,24 @@
 package main
 
 import (
-	"bytes"
-	"code.google.com/p/tasked/sec"
 	"errors"
-	"flag"
 	"os"
 	"path"
 	"testing"
-	"time"
+	"io"
+	"crypto/rand"
+	"crypto/aes"
+	"os/user"
 )
 
-var (
-	testAuth   bool
-	testInTime bool
-)
+var isRoot bool
 
 func init() {
-	ta := flag.Bool("auth", false, "")
-	ttp := flag.Bool("testInTime", false, "")
-	flag.Parse()
-	testAuth = *ta
-	testInTime = *ttp
+	usr, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	isRoot = usr.Uid == "0"
 }
 
 func envdef(key, dflt string) string {
@@ -31,6 +28,16 @@ func envdef(key, dflt string) string {
 	}
 	return val
 }
+
+func makeRandom(l int) []byte {
+	b := make([]byte, l)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic("Failed to generate random bytes.")
+	}
+	return b
+}
+
+func makeKey() []byte { return makeRandom(aes.BlockSize) }
 
 func TestEnsureDir(t *testing.T) {
 	const syserr = "Cannot create test file."
@@ -125,7 +132,7 @@ func TestGetHttpDir(t *testing.T) {
 }
 
 func TestAuthPam(t *testing.T) {
-	if !testAuth {
+	if !isRoot {
 		t.Skip()
 	}
 	user := envdef("testusr", "test")
@@ -144,104 +151,6 @@ func TestAuthPam(t *testing.T) {
 		t.Fail()
 	}
 	if nil == authPam("", "") {
-		t.Fail()
-	}
-}
-
-func TestAuthPwd(t *testing.T) {
-	if !testAuth {
-		t.Skip()
-	}
-	sec.Init(&cfg, sec.AuthFunc(authPam))
-	user := envdef("testusr", "test")
-	pwd := envdef("testpwd", "testpwd")
-
-	tk, err := sec.AuthPwd(user, pwd)
-	if err != nil || tk == nil {
-		t.Fail()
-	}
-	_, err = sec.AuthPwd(user+"x", pwd)
-	if err == nil {
-		t.Fail()
-	}
-	_, err = sec.AuthPwd(user, pwd+"x")
-	if err == nil {
-		t.Fail()
-	}
-	_, err = sec.AuthPwd(user, "")
-	if err == nil {
-		t.Fail()
-	}
-	_, err = sec.AuthPwd("", "")
-	if err == nil {
-		t.Fail()
-	}
-}
-
-func TestAuthFull(t *testing.T) {
-	if !testAuth {
-		t.Skip()
-	}
-	sec.Init(&cfg, sec.AuthFunc(authPam))
-	user := envdef("testusr", "test")
-	pwd := envdef("testpwd", "testpwd")
-	tk, err := sec.AuthPwd(user, pwd)
-	if err != nil || tk == nil {
-		t.Fail()
-	}
-	tback, err := sec.AuthToken(tk)
-	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
-		t.Fail()
-	}
-	tback, err = sec.AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
-		t.Fail()
-	}
-	userBack, err := sec.GetUser(tk)
-	if err != nil || userBack != user {
-		t.Fail()
-	}
-}
-
-func TestAuthFullTime(t *testing.T) {
-	if !testInTime {
-		t.Skip()
-	}
-	if !testAuth {
-		t.Skip()
-	}
-	sec.Init(&cfg, sec.AuthFunc(authPam))
-	user := envdef("testusr", "test")
-	pwd := envdef("testpwd", "testpwd")
-	tk, err := sec.AuthPwd(user, pwd)
-	if err != nil || tk == nil {
-		t.Fail()
-	}
-	time.Sleep(time.Second)
-	tback, err := sec.AuthToken(tk)
-	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
-		t.Fail()
-	}
-	tback, err = sec.AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
-		t.Fail()
-	}
-	time.Sleep(2 * time.Second)
-	tback, err = sec.AuthToken(tk)
-	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
-		t.Fail()
-	}
-	tback, err = sec.AuthTokenBytes(tk.Value())
-	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
-		t.Fail()
-	}
-	time.Sleep(20 * time.Second)
-	tback, err = sec.AuthToken(tk)
-	if err == nil {
-		t.Fail()
-	}
-	tback, err = sec.AuthTokenBytes(tk.Value())
-	if err == nil {
 		t.Fail()
 	}
 }
