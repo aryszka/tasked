@@ -85,13 +85,13 @@ func (tc *httpTestConfig) Address() string { return tc.address }
 func (tc *httpTestConfig) TlsKey() []byte  { return tc.tlsKey }
 func (tc *httpTestConfig) TlsCert() []byte { return tc.tlsCert }
 
-func TestReadHttpConfig(t *testing.T) {
+func TestGetHttpConfig(t *testing.T) {
 	cfgOrig := cfg
 
 	// default
 	dtk, dtc := []byte(defaultTlsKey), []byte(defaultTlsCert)
 	cfg = config{}
-	tk, tc, a := readHttpConfig()
+	tk, tc, a := getHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
 		t.Fail()
 	}
@@ -99,7 +99,7 @@ func TestReadHttpConfig(t *testing.T) {
 	// set TLS key
 	vk, vc := []byte(testTlsKey), []byte(testTlsCert)
 	cfg.http.tls.key = vk
-	tk, tc, a = readHttpConfig()
+	tk, tc, a = getHttpConfig()
 	if !bytes.Equal(tk, vk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
 		t.Fail()
 	}
@@ -107,7 +107,7 @@ func TestReadHttpConfig(t *testing.T) {
 	// set TLS cert
 	cfg = config{}
 	cfg.http.tls.cert = vc
-	tk, tc, a = readHttpConfig()
+	tk, tc, a = getHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, vc) || a != defaultAddress {
 		t.Fail()
 	}
@@ -115,7 +115,7 @@ func TestReadHttpConfig(t *testing.T) {
 	// set address
 	cfg = config{}
 	cfg.http.address = ":8080"
-	tk, tc, a = readHttpConfig()
+	tk, tc, a = getHttpConfig()
 	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != ":8080" {
 		t.Fail()
 	}

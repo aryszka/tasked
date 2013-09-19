@@ -1,4 +1,4 @@
-package sec
+package auth
 
 import (
 	"bytes"
@@ -64,7 +64,7 @@ func authFunc(u, p string) error {
 func resetConfig() {
 	err := Init(&testConfig{makeKey(), makeKey(), 18}, AuthFunc(authFunc))
 	if err != nil {
-		panic("Failed to reset sec config.")
+		panic("Failed to reset auth config.")
 	}
 }
 
@@ -513,6 +513,21 @@ func TestAuthFullTime(t *testing.T) {
 	}
 	tback, err = AuthTokenBytes(tk.Value())
 	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestEncryptionOfLongData(t *testing.T) {
+	data := makeRandom(1 << 18)
+	encrypted, err := crypt(data)
+	if err != nil {
+		t.Fail()
+	}
+	decrypted, err := crypt(encrypted)
+	if err != nil {
+		t.Fail()
+	}
+	if !bytes.Equal(data, decrypted) {
 		t.Fail()
 	}
 }

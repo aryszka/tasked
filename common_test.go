@@ -29,7 +29,7 @@ func withNewFile(fn string, do func(*os.File) error) error {
 	if err != nil {
 		return err
 	}
-	defer doretlog42(func() error { return f.Close() })
+	defer doretlog42(f.Close)
 	if do == nil {
 		return nil
 	}

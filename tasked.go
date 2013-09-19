@@ -5,7 +5,7 @@ package main
 
 import (
 	"code.google.com/p/gopam"
-	"code.google.com/p/tasked/sec"
+	"code.google.com/p/tasked/auth"
 	"errors"
 	"fmt"
 	"os"
@@ -83,7 +83,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = sec.Init(&cfg, sec.AuthFunc(authPam))
+	err = auth.Init(&cfg, auth.AuthFunc(authPam))
 	if err != nil {
 		printerrln(err)
 		os.Exit(1)

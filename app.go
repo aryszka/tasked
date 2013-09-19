@@ -12,7 +12,7 @@ const noTlsWarning = "Tls has not been configured."
 
 // Reads and evaluates the http related configuration from cfg.
 // If a value is not defined, falls back to defaults.
-func readHttpConfig() (tlsKey, tlsCert []byte, address string) {
+func getHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	tlsKey = []byte(defaultTlsKey)
 	tlsCert = []byte(defaultTlsCert)
 	tk := cfg.http.tls.key
@@ -42,7 +42,7 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	}
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
-		doretlog42(func() error { return l.Close() })
+		doretlog42(l.Close)
 		return nil, err
 	}
 	l = tls.NewListener(l, &tls.Config{
@@ -55,11 +55,10 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 // Within the config, TLS certification and key must be provided. (The hardcoded default serves only testing
 // purpose.)
 func serve() error {
-	tlsKey, tlsCert, address := readHttpConfig()
-	l, err := listen(tlsKey, tlsCert, address)
+	l, err := listen(getHttpConfig())
 	if err != nil {
 		return err
 	}
-	defer doretlog42(func() error { return l.Close() })
+	defer doretlog42(l.Close)
 	return http.Serve(l, http.HandlerFunc(handler))
 }

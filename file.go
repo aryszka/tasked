@@ -50,7 +50,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if handleError(w, r, err) {
 			return
 		}
-		defer doretlog42(func() error { return f.Close() })
+		defer doretlog42(f.Close)
 		s, err := f.Stat()
 		if handleError(w, r, err) {
 			return
@@ -61,7 +61,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if handleError(w, r, err) {
 			return
 		}
-		defer doretlog42(func() error { return f.Close() })
+		defer doretlog42(f.Close)
 		_, err = io.Copy(f, r.Body)
 		handleError(w, r, err)
 	case "DELETE":
