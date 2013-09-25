@@ -7,7 +7,7 @@ import (
 	"code.google.com/p/gopam"
 	"code.google.com/p/tasked/auth"
 	"errors"
-	"fmt"
+	"log"
 	"os"
 	"path"
 )
@@ -15,7 +15,6 @@ import (
 const (
 	defaultTestdir = "test"
 	testdirKey     = "testdir"
-	fnbase         = "file"
 )
 
 func getHttpDir() string {
@@ -47,13 +46,6 @@ func ensureDir(dir string) error {
 	return err
 }
 
-func printerrln(e ...interface{}) {
-	_, err := fmt.Fprintln(os.Stderr, e...)
-	if err != nil {
-		panic("Failed to write to stderr.")
-	}
-}
-
 func authPam(user, pwd string) error {
 	fail := func() error { return errors.New("Authentication failed.") }
 	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
@@ -79,23 +71,19 @@ func authPam(user, pwd string) error {
 func main() {
 	err := initConfig()
 	if err != nil {
-		printerrln(err)
-		os.Exit(1)
+		log.Panicln(err)
 	}
 
 	err = auth.Init(&cfg, auth.AuthFunc(authPam))
 	if err != nil {
-		printerrln(err)
-		os.Exit(1)
+		log.Panicln(err)
 	}
 
 	dn := getHttpDir()
 	ensureDir(dn)
-	fn = path.Join(dn, fnbase)
 
 	err = serve()
 	if err != nil {
-		printerrln(err)
-		os.Exit(1)
+		log.Panicln(err)
 	}
 }

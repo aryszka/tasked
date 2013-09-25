@@ -15,7 +15,6 @@ const (
 
 var (
 	testTokenValidity = 1200
-	testdir           = defaultTestdir
 )
 
 // duplicate

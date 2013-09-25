@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"net"
-	"os"
-	"path"
 	"testing"
 )
 
@@ -46,34 +44,6 @@ ja5JCKq4V6B3O32gOEhgAdh6OUE4iWYxGhWd3wYUevdyFw==
 -----END CERTIFICATE-----
 `
 )
-
-func init() {
-	get := func() string {
-		td := os.Getenv(testdirKey)
-		if len(td) > 0 {
-			return td
-		}
-		td = os.Getenv("GOPATH")
-		if len(td) > 0 {
-			return path.Join(td, defaultTestdir)
-		}
-		td = os.Getenv("HOME")
-		if len(td) > 0 {
-			return path.Join(td, defaultTestdir)
-		}
-		td, err := os.Getwd()
-		if err != nil {
-			panic(failedToInitTestdir)
-		}
-		return path.Join(td, defaultTestdir)
-	}
-	testdir = get()
-	err := ensureDir(testdir)
-	if err != nil {
-		panic(failedToInitTestdir)
-	}
-	fn = path.Join(testdir, fnbase)
-}
 
 type httpTestConfig struct {
 	address string

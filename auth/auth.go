@@ -10,6 +10,7 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
+	"log"
 	"time"
 )
 
@@ -192,8 +193,17 @@ func Init(c Config, a Authenticator) error {
 		return errors.New("Authenticator must be defined.")
 	}
 	auth = a
-	key = c.AesKey()
-	iv = c.AesIv()
+	k := c.AesKey()
+	i := c.AesIv()
+	if len(k) == 0 || len(i) == 0 {
+		log.Println("AES has not been configured.")
+	}
+	if len(k) > 0 {
+		key = k
+	}
+	if len(i) > 0 {
+		iv = i
+	}
 	tokenValidity = time.Duration(c.TokenValidity()) * time.Second
 	renewThreshold = time.Duration(float64(tokenValidity) * renewThresholdRate)
 	return nil

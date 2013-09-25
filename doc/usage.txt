@@ -18,3 +18,9 @@ Pem format.
 ### AES keys
 
 No line break at the end.
+
+
+Syncing
+-------
+
+Have the clock configured, because syncing deleted files can trick you.

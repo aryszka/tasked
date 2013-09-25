@@ -11,7 +11,10 @@ import (
 	"testing"
 )
 
-var isRoot bool
+var (
+	isRoot  bool
+	testdir = defaultTestdir
+)
 
 func init() {
 	usr, err := user.Current()
@@ -19,6 +22,29 @@ func init() {
 		panic(err)
 	}
 	isRoot = usr.Uid == "0"
+	testdir = func() string {
+		td := os.Getenv(testdirKey)
+		if len(td) > 0 {
+			return td
+		}
+		td = os.Getenv("GOPATH")
+		if len(td) > 0 {
+			return path.Join(td, defaultTestdir)
+		}
+		td = os.Getenv("HOME")
+		if len(td) > 0 {
+			return path.Join(td, defaultTestdir)
+		}
+		td, err := os.Getwd()
+		if err != nil {
+			panic(failedToInitTestdir)
+		}
+		return path.Join(td, defaultTestdir)
+	}()
+	err = ensureDir(testdir)
+	if err != nil {
+		panic(failedToInitTestdir)
+	}
 }
 
 func envdef(key, dflt string) string {

@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-const noTlsWarning = "Tls has not been configured."
+const noTlsWarning = "TLS has not been configured."
 
 // Reads and evaluates the http related configuration from cfg.
 // If a value is not defined, falls back to defaults.

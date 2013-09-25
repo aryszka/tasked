@@ -6,7 +6,7 @@ import (
 )
 
 // Tries executing a function. If it fails, retries after a delay but in a new
-// goroutine. If it fails again, reports (e.g. log) both errors.
+// goroutine. If it fails again, reports (e.g. to log) both errors.
 func doretrep(do func() error, delay time.Duration, report func(...interface{})) {
 	err0 := do()
 	if err0 == nil {
