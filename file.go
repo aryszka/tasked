@@ -18,30 +18,30 @@ const (
 )
 
 type propertiesExt struct {
-	Mode       os.FileMode
-	Owner      string
-	Group      string
-	ModeString string
-	AccessTime int64
-	ChangeTime int64
+	Mode       os.FileMode `json:"mode"`
+	Owner      string      `json:"owner"`
+	Group      string      `json:"group"`
+	ModeString string      `json:"modeString"`
+	AccessTime int64       `json:"accessTime"`
+	ChangeTime int64       `json:"changeTime"`
 }
 
 type properties struct {
 	// owner only
-	Ext *propertiesExt `json:"omitempty"`
+	Ext *propertiesExt `json:"ext,omitempty"`
 
 	// everybody can see with read rights
-	Name    string
-	Size    int64
-	ModTime int64
-	IsDir   bool
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"modTime"`
+	IsDir   bool   `json:"isDir"`
 }
 
 var (
 	dn                  string // directory opened for HTTP
-	wwwAuthHeader       = http.CanonicalHeaderKey("www-authenticate")
-	contentTypeHeader   = http.CanonicalHeaderKey("content-type")
-	contentLengthHeader = http.CanonicalHeaderKey("content-length")
+	headerWwwAuth       = http.CanonicalHeaderKey("www-authenticate")
+	headerContentType   = http.CanonicalHeaderKey("content-type")
+	headerContentLength = http.CanonicalHeaderKey("content-length")
 
 	// mapping from HTTP methods to functions
 	reqmap = map[string]func(http.ResponseWriter, *http.Request){
@@ -59,9 +59,6 @@ var (
 )
 
 func toProps(fi os.FileInfo, ext bool) *properties {
-	if fi == nil {
-		return nil
-	}
 	p := &properties{
 		Name:    fi.Name(),
 		Size:    fi.Size(),
@@ -112,7 +109,7 @@ func checkHandleError(w http.ResponseWriter, err error) bool {
 	case os.IsNotExist(err):
 		errorResponse(w, http.StatusNotFound)
 	case os.IsPermission(err):
-		w.Header().Set(wwwAuthHeader, authTasked)
+		w.Header().Set(headerWwwAuth, authTasked)
 		errorResponse(w, http.StatusNotFound)
 	default:
 		errorResponse(w, http.StatusInternalServerError)
@@ -157,19 +154,17 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pr := toProps(fi, false)
-	if !checkHandle(w, pr != nil, http.StatusInternalServerError) {
-		return
-	}
 	js, err := json.Marshal(pr)
 	if !checkHandleError(w, err) {
 		return
 	}
 	h := w.Header()
-	h.Set(contentTypeHeader, jsonContentType)
-	h.Set(contentLengthHeader, fmt.Sprintf("%d", len(js)))
+	h.Set(headerContentType, jsonContentType)
+	h.Set(headerContentLength, fmt.Sprintf("%d", len(js)))
 	if r.Method == "HEAD" {
 		return
 	}
+	w.WriteHeader(http.StatusOK)
 	w.Write(js) // TODO: log err and if written count != len
 }
 
@@ -182,7 +177,8 @@ func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo)
 	// if accept encoding doesn't match, then error
 }
 
-func options(w http.ResponseWriter, r *http.Request) { /* no-op */
+func options(w http.ResponseWriter, r *http.Request) {
+	// no-op
 }
 
 func props(w http.ResponseWriter, r *http.Request) {

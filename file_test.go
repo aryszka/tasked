@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"path"
+	"encoding/json"
+	"strconv"
 )
 
 type fileInfo struct {
@@ -100,7 +103,7 @@ func testStatusCode(code int, h http.Handler,
 func testMethodNotAllowed(method string, t *testing.T) {
 	testStatusCode(http.StatusMethodNotAllowed, http.HandlerFunc(handler),
 		func(c *http.Client, url string) (*http.Response, error) {
-			req, err := http.NewRequest(method, url, new(bytes.Buffer))
+			req, err := http.NewRequest(method, url, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -179,7 +182,7 @@ func testPut(content, body []byte, code int, t *testing.T) {
 func testDelete(body []byte, code int, t *testing.T) {
 	testReq(body, code, nil,
 		func(c *http.Client, url string) (*http.Response, error) {
-			req, err := http.NewRequest("DELETE", url, new(bytes.Buffer))
+			req, err := http.NewRequest("DELETE", url, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -192,11 +195,7 @@ func TestToProps(t *testing.T) {
 		defaultTime time.Time
 		defaultMode os.FileMode
 	)
-	p := toProps(nil, false)
-	if p != nil {
-		t.Fail()
-	}
-	p = toProps(&fileInfo{}, false)
+	p := toProps(&fileInfo{}, false)
 	if len(p.Name) != 0 ||
 		p.Size != 0 ||
 		p.ModTime != defaultTime.Unix() ||
@@ -329,7 +328,7 @@ func TestCheckHandleError(t *testing.T) {
 
 	// 404 - no permission
 	r := testCheckHandleError(os.ErrPermission, http.StatusNotFound, t)
-	wah := r.Header[wwwAuthHeader]
+	wah := r.Header[headerWwwAuth]
 	if len(wah) != 1 || wah[0] != authTasked {
 		t.Fail()
 	}
@@ -405,8 +404,6 @@ func TestCheckBadReq(t *testing.T) {
 		}
 		if should && resp.StatusCode != http.StatusBadRequest ||
 			!should && resp.StatusCode != http.StatusOK {
-			t.Log(should)
-			t.Log(resp.StatusCode)
 			return errors.New("error")
 		}
 		return nil
@@ -486,7 +483,6 @@ func TestCheckQryCmd(t *testing.T) {
 		return &http.Request{URL: &url.URL{RawQuery: u}}
 	}
 	if _, ok := checkQryCmd(httptest.NewRecorder(), mkreq("%%")); ok {
-		t.Log("here")
 		t.Fail()
 	}
 	if cmd, ok := checkQryCmd(httptest.NewRecorder(), mkreq("")); !ok || len(cmd) > 0 {
@@ -512,10 +508,108 @@ func TestCheckQryCmd(t *testing.T) {
 	}
 }
 
+func TestFileProps(t *testing.T) {
+	dn = path.Join(testdir, "http")
+	ensureDir(dn)
+	err := withTestServer(http.HandlerFunc(fileProps), func(url string) error {
+		client := mkclient()
+		fn := "some-file"
+		p := path.Join(dn, fn)
+		err := os.Remove(p)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		req, err := http.NewRequest("PROPS", url + "/" + fn, nil)
+		if err != nil {
+			return err
+		}
+		rsp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		if rsp.StatusCode != http.StatusNotFound {
+			return errors.New("fail")
+		}
+		err = withNewFile(p, nil)
+		if err != nil {
+			return err
+		}
+		req, err = http.NewRequest("PROPS", url + "/" + fn, nil)
+		if err != nil {
+			return err
+		}
+		rsp, err = client.Do(req)
+		if err != nil {
+			return err
+		}
+		if rsp.StatusCode != http.StatusOK ||
+			rsp.Header.Get(headerContentType) != jsonContentType {
+			return errors.New("fail")
+		}
+		fiVerify, err := os.Stat(p)
+		if err != nil {
+			return err
+		}
+		jsVerify, err := json.Marshal(toProps(fiVerify, false))
+		if err != nil {
+			return err
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		if err != nil {
+			return err
+		}
+		if len(jsVerify) != clen {
+			return errors.New("fail")
+		}
+		js, err := ioutil.ReadAll(rsp.Body)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(js, jsVerify) {
+			return errors.New("fail")
+		}
+		var pr properties
+		err = json.Unmarshal(js, &pr)
+		if err != nil {
+			return err
+		}
+		req, err = http.NewRequest("HEAD", url + "/" + fn, nil)
+		if err != nil {
+			return err
+		}
+		rsp, err = client.Do(req)
+		if err != nil {
+			return err
+		}
+		if rsp.StatusCode != http.StatusOK ||
+			rsp.Header.Get(headerContentType) != jsonContentType {
+			return errors.New("fail")
+		}
+		clen, err = strconv.Atoi(rsp.Header.Get(headerContentLength))
+		if err != nil {
+			return err
+		}
+		if len(jsVerify) != clen {
+			return errors.New("fail")
+		}
+		js, err = ioutil.ReadAll(rsp.Body)
+		if err != nil {
+			return err
+		}
+		if len(js) != 0 {
+			return errors.New("fail")
+		}
+		return nil
+	});
+	if err != nil {
+		t.Fail()
+	}
+}
+
 func TestOptions(t *testing.T) {
 	testReq(nil, 200, map[string][]string{"Content-Length": []string{"0"}},
 		func(c *http.Client, url string) (*http.Response, error) {
-			req, err := http.NewRequest("OPTIONS", url, new(bytes.Buffer))
+			req, err := http.NewRequest("OPTIONS", url, nil)
 			if err != nil {
 				return nil, err
 			}
