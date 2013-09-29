@@ -58,18 +58,20 @@ var (
 		"MKDIR":    mkdir}
 )
 
-func toProps(fi os.FileInfo, ext bool) *properties {
-	p := &properties{
-		Name:    fi.Name(),
-		Size:    fi.Size(),
-		ModTime: fi.ModTime().Unix(),
-		IsDir:   fi.IsDir()}
+func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
+	m := map[string]interface{}{
+		"name":    fi.Name(),
+		"size":    fi.Size(),
+		"modTime": fi.ModTime().Unix(),
+		"isDir":   fi.IsDir()}
 	if ext {
-		p.Ext = &propertiesExt{
-			ModeString: fmt.Sprint(fi.Mode()),
-			Mode:       fi.Mode()}
+		m["ext"] = map[string]interface{}{
+			"modeString": fmt.Sprint(fi.Mode()),
+			"mode":       fi.Mode()}
+		// missing:
+		// - owner, group, accessTime, changeTime
 	}
-	return p
+	return m
 }
 
 func getValues(vs map[string][]string, key string, allowed ...string) ([]string, bool) {
@@ -153,7 +155,7 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 	if !checkHandleError(w, err) {
 		return
 	}
-	pr := toProps(fi, false)
+	pr := toPropertyMap(fi, false)
 	js, err := json.Marshal(pr)
 	if !checkHandleError(w, err) {
 		return
@@ -166,6 +168,18 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(js) // TODO: log err and if written count != len
+}
+
+func modFileProps(w http.ResponseWriter, r *http.Request) {
+	// get the properties
+	// 204 if no properties to be updated
+	// check what's different
+	// check if all diff can be updated
+	// if not defined, ignore
+	// update what's different
+	// problem: how about zero values
+	// try json marshalling with maps
+	// verify numeric values to be precise
 }
 
 func getDir(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
@@ -194,6 +208,7 @@ func modprops(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	modFileProps(w, r)
 }
 
 func get(w http.ResponseWriter, r *http.Request) {

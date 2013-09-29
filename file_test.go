@@ -190,54 +190,142 @@ func testDelete(body []byte, code int, t *testing.T) {
 		}, t)
 }
 
-func TestToProps(t *testing.T) {
+func compareProperties(left, right map[string]interface{}) bool {
+	// TODO: use reflection
+	compareString := func(key string) bool {
+		lval, ok := left[key]
+		if ok {
+			lvalString, ok := lval.(string)
+			if !ok {
+				return false
+			}
+			rvalString, ok := right[key].(string)
+			if !ok || rvalString != lvalString {
+				return false
+			}
+		}
+		return true
+	}
+	compareInt64 := func(key string) bool {
+		lval, ok := left[key]
+		if ok {
+			lvalInt, ok := lval.(int64)
+			if !ok {
+				return false
+			}
+			rvalInt, ok := right[key].(int64)
+			if !ok || rvalInt != lvalInt {
+				return false
+			}
+		}
+		return true
+	}
+	compareFileMode := func(key string) bool { // make it int32
+		lval, ok := left[key]
+		if ok {
+			lvalInt, ok := lval.(os.FileMode)
+			if !ok {
+				return false
+			}
+			rvalInt, ok := right[key].(os.FileMode)
+			if !ok || rvalInt != lvalInt {
+				return false
+			}
+		}
+		return true
+	}
+	compareBool := func(key string) bool {
+		lval, ok := left[key]
+		if ok {
+			lvalBool, ok := lval.(bool)
+			if !ok {
+				return false
+			}
+			rvalBool, ok := right[key].(bool)
+			if !ok || rvalBool != lvalBool {
+				return false
+			}
+		}
+		return true
+	}
+	if len(left) != len(right) ||
+		!compareString("name") ||
+		!compareInt64("size") ||
+		!compareInt64("modTime") ||
+		!compareBool("isDir") {
+		return false
+	}
+	if lext, ok := left["ext"]; ok {
+		lextMap, ok := lext.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		rextMap, ok := right["ext"].(map[string]interface{})
+		if !ok {
+			return false
+		}
+		left, right = lextMap, rextMap
+		if len(left) != len(right) ||
+			!compareString("modeString") ||
+			!compareFileMode("mode") {
+			return false
+		}
+	}
+	return true
+}
+
+func TestPropertyMap(t *testing.T) {
 	var (
 		defaultTime time.Time
 		defaultMode os.FileMode
 	)
-	p := toProps(&fileInfo{}, false)
-	if len(p.Name) != 0 ||
-		p.Size != 0 ||
-		p.ModTime != defaultTime.Unix() ||
-		p.IsDir ||
-		p.Ext != nil {
+	p := toPropertyMap(&fileInfo{}, false)
+	if !compareProperties(p, map[string]interface{}{
+		"name": "",
+		"size": int64(0),
+		"modTime": defaultTime.Unix(),
+		"isDir": false}) {
 		t.Fail()
 	}
 	now := time.Now()
-	p = toProps(&fileInfo{
+	p = toPropertyMap(&fileInfo{
 		name:    "some",
 		size:    42,
 		mode:    os.ModePerm,
 		modTime: now,
 		isDir:   true}, false)
-	if p.Name != "some" ||
-		p.Size != 42 ||
-		p.ModTime != now.Unix() ||
-		!p.IsDir ||
-		p.Ext != nil {
+	if !compareProperties(p, map[string]interface{}{
+		"name": "some",
+		"size": int64(42),
+		"modTime": now.Unix(),
+		"isDir": true}) {
 		t.Fail()
 	}
-	p = toProps(&fileInfo{}, true)
-	if len(p.Name) != 0 ||
-		p.Size != 0 ||
-		p.ModTime != defaultTime.Unix() ||
-		p.IsDir ||
-		p.Ext.Mode != defaultMode ||
-		p.Ext.ModeString != fmt.Sprint(defaultMode) {
+	p = toPropertyMap(&fileInfo{}, true)
+	if !compareProperties(p, map[string]interface{}{
+		"name": "",
+		"size": int64(0),
+		"modTime": defaultTime.Unix(),
+		"isDir": false,
+		"ext": map[string]interface{} {
+			"mode": defaultMode,
+			"modeString": fmt.Sprint(defaultMode)}}) {
 		t.Fail()
 	}
-	p = toProps(&fileInfo{
+	p = toPropertyMap(&fileInfo{
 		name:    "some",
 		size:    42,
 		mode:    os.ModePerm,
 		modTime: now,
 		isDir:   true}, true)
-	if p.Name != "some" ||
-		p.Size != 42 ||
-		p.ModTime != now.Unix() ||
-		!p.IsDir ||
-		p.Ext.Mode != os.ModePerm ||
-		p.Ext.ModeString != fmt.Sprint(os.ModePerm) {
+	if !compareProperties(p, map[string]interface{}{
+		"name": "some",
+		"size": int64(42),
+		"modTime": now.Unix(),
+		"isDir": true,
+		"ext": map[string]interface{} {
+			"mode": os.ModePerm,
+			"modeString": fmt.Sprint(os.ModePerm)}}) {
 		t.Fail()
 	}
 }
@@ -511,9 +599,9 @@ func TestCheckQryCmd(t *testing.T) {
 func TestFileProps(t *testing.T) {
 	dn = path.Join(testdir, "http")
 	ensureDir(dn)
+	fn := "some-file"
 	err := withTestServer(http.HandlerFunc(fileProps), func(url string) error {
 		client := mkclient()
-		fn := "some-file"
 		p := path.Join(dn, fn)
 		err := os.Remove(p)
 		if err != nil && !os.IsNotExist(err) {
@@ -550,7 +638,8 @@ func TestFileProps(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		jsVerify, err := json.Marshal(toProps(fiVerify, false))
+		prVerify := toPropertyMap(fiVerify, false)
+		jsVerify, err := json.Marshal(prVerify)
 		if err != nil {
 			return err
 		}
@@ -568,9 +657,9 @@ func TestFileProps(t *testing.T) {
 		if !bytes.Equal(js, jsVerify) {
 			return errors.New("fail")
 		}
-		var pr properties
+		var pr map[string]interface{}
 		err = json.Unmarshal(js, &pr)
-		if err != nil {
+		if err != nil || !compareProperties(pr, prVerify) {
 			return err
 		}
 		req, err = http.NewRequest("HEAD", url + "/" + fn, nil)
@@ -615,6 +704,47 @@ func TestOptions(t *testing.T) {
 			}
 			return c.Do(req)
 		}, t)
+}
+
+func TestProps(t *testing.T) {
+	server, err := serveTest(http.HandlerFunc(props))
+	if err != nil {
+		t.Fatal()
+	}
+	defer server.Close()
+	dn = path.Join(testdir, "http")
+	ensureDir(dn)
+	fn := "some-file"
+	p := path.Join(dn, fn)
+	err = withNewFile(p, nil)
+	if err != nil {
+		t.Fatal()
+	}
+	client := mkclient()
+	req, err := http.NewRequest("PROPS", server.URL + "/" + fn, nil)
+	if err != nil {
+		t.Fatal()
+	}
+	rsp, err := client.Do(req)
+	if err != nil || rsp.StatusCode != http.StatusOK {
+		t.Fail()
+	}
+	req, err = http.NewRequest("PROPS", server.URL + "/" + fn + "?cmd=props", nil)
+	if err != nil {
+		t.Fatal()
+	}
+	rsp, err = client.Do(req)
+	if err != nil || rsp.StatusCode != http.StatusBadRequest {
+		t.Fail()
+	}
+	req, err = http.NewRequest("PROPS", server.URL + "/" + fn + "?cmd=anything", nil)
+	if err != nil {
+		t.Fatal()
+	}
+	rsp, err = client.Do(req)
+	if err != nil || rsp.StatusCode != http.StatusBadRequest {
+		t.Fail()
+	}
 }
 
 // func TestGet(t *testing.T) {
