@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,37 +12,19 @@ import (
 )
 
 const (
-	cmdKey          = "cmd"    // querystring key for method replacement commands
-	cmdProps        = "props"  // command replacing the PROPS method
-	authTasked      = "tasked" // www-authenticate value used on no permission
-	jsonContentType = "application/json"
+	cmdKey                = "cmd"    // querystring key for method replacement commands
+	cmdProps              = "props"  // command replacing the PROPS method
+	authTasked            = "tasked" // www-authenticate value used on no permission
+	jsonContentType       = "application/json"
+	defaultMaxRequestBody = 1 << 30 // todo: make this configurable
 )
-
-type propertiesExt struct {
-	Mode       os.FileMode `json:"mode"`
-	Owner      string      `json:"owner"`
-	Group      string      `json:"group"`
-	ModeString string      `json:"modeString"`
-	AccessTime int64       `json:"accessTime"`
-	ChangeTime int64       `json:"changeTime"`
-}
-
-type properties struct {
-	// owner only
-	Ext *propertiesExt `json:"ext,omitempty"`
-
-	// everybody can see with read rights
-	Name    string `json:"name"`
-	Size    int64  `json:"size"`
-	ModTime int64  `json:"modTime"`
-	IsDir   bool   `json:"isDir"`
-}
 
 var (
 	dn                  string // directory opened for HTTP
-	headerWwwAuth       = http.CanonicalHeaderKey("www-authenticate")
-	headerContentType   = http.CanonicalHeaderKey("content-type")
-	headerContentLength = http.CanonicalHeaderKey("content-length")
+	headerWwwAuth              = http.CanonicalHeaderKey("www-authenticate")
+	headerContentType          = http.CanonicalHeaderKey("content-type")
+	headerContentLength        = http.CanonicalHeaderKey("content-length")
+	maxRequestBody      int64  = defaultMaxRequestBody
 
 	// mapping from HTTP methods to functions
 	reqmap = map[string]func(http.ResponseWriter, *http.Request){
@@ -103,7 +86,7 @@ func errorResponse(w http.ResponseWriter, s int) {
 // Writes an error response according to the given error.
 // If the error is permission related, it uses 404 Not Found,
 // but the response header will contain: 'Www-Authenticate: tasked.'
-func checkHandleError(w http.ResponseWriter, err error) bool {
+func checkOsError(w http.ResponseWriter, err error, defaultStatus int) bool {
 	if err == nil {
 		return true
 	}
@@ -114,7 +97,7 @@ func checkHandleError(w http.ResponseWriter, err error) bool {
 		w.Header().Set(headerWwwAuth, authTasked)
 		errorResponse(w, http.StatusNotFound)
 	default:
-		errorResponse(w, http.StatusInternalServerError)
+		errorResponse(w, defaultStatus)
 	}
 	return false
 }
@@ -152,12 +135,12 @@ func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (str
 func fileProps(w http.ResponseWriter, r *http.Request) {
 	p := path.Join(dn, r.URL.Path)
 	fi, err := os.Stat(p)
-	if !checkHandleError(w, err) {
+	if !checkOsError(w, err, http.StatusBadRequest) {
 		return
 	}
 	pr := toPropertyMap(fi, false)
 	js, err := json.Marshal(pr)
-	if !checkHandleError(w, err) {
+	if !checkBadReq(w, err == nil) {
 		return
 	}
 	h := w.Header()
@@ -166,20 +149,50 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "HEAD" {
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(js) // TODO: log err and if written count != len
+	w.Write(js) // todo: add optional log err and if written count != len
 }
 
 func modFileProps(w http.ResponseWriter, r *http.Request) {
-	// get the properties
-	// 204 if no properties to be updated
-	// check what's different
-	// check if all diff can be updated
-	// if not defined, ignore
-	// update what's different
-	// problem: how about zero values
-	// try json marshalling with maps
-	// verify numeric values to be precise
+	br := http.MaxBytesReader(w, r.Body, maxRequestBody)
+	defer doretlog42(br.Close)
+	b, err := ioutil.ReadAll(br)
+	if !checkHandle(w, err == nil, http.StatusRequestEntityTooLarge) {
+		return
+	}
+	if len(b) == 0 {
+		return
+	}
+	var m map[string]interface{}
+	err = json.Unmarshal(b, &m)
+	if !checkBadReq(w, err == nil) {
+		return
+	}
+	if len(m) == 0 {
+		return
+	}
+
+	p := path.Join(dn, r.URL.Path)
+	_, err = os.Stat(p)
+	if !checkOsError(w, err, http.StatusBadRequest) {
+		return
+	}
+
+	for k, v := range m {
+		switch k {
+		case "mode":
+			mode, ok := v.(uint32)
+			if !checkBadReq(w, ok) {
+				return
+			}
+			// todo: what all can be in os.FileMode?
+			err = os.Chmod(p, os.FileMode(mode))
+			if !checkOsError(w, err, http.StatusBadRequest) {
+				return
+			}
+			// case "owner":
+			// case "group"
+		}
+	}
 }
 
 func getDir(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
@@ -222,12 +235,12 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	p := path.Join(dn, r.URL.Path)
 	f, err := os.Open(p)
-	if checkHandleError(w, err) {
+	if checkOsError(w, err, http.StatusBadRequest) {
 		return
 	}
 	defer doretlog42(f.Close)
 	fi, err := f.Stat()
-	if checkHandleError(w, err) {
+	if checkOsError(w, err, http.StatusInternalServerError) {
 		return
 	}
 	if fi.IsDir() {
@@ -242,13 +255,13 @@ func put(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, err := os.Create(dn)
-	if checkHandleError(w, err) {
+	f, err := os.Create(path.Join(dn, r.URL.Path))
+	if checkOsError(w, err, http.StatusBadRequest) {
 		return
 	}
 	defer doretlog42(f.Close)
 	_, err = io.Copy(f, r.Body)
-	checkHandleError(w, err)
+	checkOsError(w, err, http.StatusInternalServerError)
 }
 
 func post(w http.ResponseWriter, r *http.Request) {
@@ -262,21 +275,11 @@ func rename(w http.ResponseWriter, r *http.Request) {
 }
 
 func delete(w http.ResponseWriter, r *http.Request) {
-	fi, err := os.Stat(dn)
+	err := os.RemoveAll(path.Join(dn, r.URL.Path))
 	if os.IsNotExist(err) {
 		return
 	}
-	if !checkHandleError(w, err) {
-		return
-	}
-	if !checkHandle(w, fi.Mode()&(1<<7) == 0, http.StatusUnauthorized) {
-		return
-	}
-	err = os.Remove(dn)
-	if os.IsNotExist(err) {
-		return
-	}
-	checkHandleError(w, err)
+	checkOsError(w, err, http.StatusBadRequest)
 }
 
 func mkdir(w http.ResponseWriter, r *http.Request) {
