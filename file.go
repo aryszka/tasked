@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
 	"path"
+	"strconv"
+	"syscall"
 )
 
 const (
@@ -16,7 +19,8 @@ const (
 	cmdProps              = "props"  // command replacing the PROPS method
 	authTasked            = "tasked" // www-authenticate value used on no permission
 	jsonContentType       = "application/json"
-	defaultMaxRequestBody = 1 << 30 // todo: make this configurable
+	defaultMaxRequestBody = 1 << 30               // todo: make this configurable
+	modeMask              = os.FileMode(1)<<9 - 1 // the least significant 9 bits
 )
 
 var (
@@ -41,6 +45,10 @@ var (
 		"MKDIR":    mkdir}
 )
 
+func replaceMode(n, m os.FileMode) os.FileMode {
+	return n&^modeMask | m&modeMask
+}
+
 func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 	m := map[string]interface{}{
 		"name":    fi.Name(),
@@ -48,9 +56,9 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 		"modTime": fi.ModTime().Unix(),
 		"isDir":   fi.IsDir()}
 	if ext {
-		m["ext"] = map[string]interface{}{
-			"modeString": fmt.Sprint(fi.Mode()),
-			"mode":       fi.Mode()}
+		mm := replaceMode(0, fi.Mode())
+		m["modeString"] = fmt.Sprint(mm)
+		m["mode"] = mm
 		// missing:
 		// - owner, group, accessTime, changeTime
 	}
@@ -86,7 +94,8 @@ func errorResponse(w http.ResponseWriter, s int) {
 // Writes an error response according to the given error.
 // If the error is permission related, it uses 404 Not Found,
 // but the response header will contain: 'Www-Authenticate: tasked.'
-func checkOsError(w http.ResponseWriter, err error, defaultStatus int) bool {
+// (Only useful when the error cause is directly rooted in the request.)
+func checkOsError(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return true
 	}
@@ -97,7 +106,12 @@ func checkOsError(w http.ResponseWriter, err error, defaultStatus int) bool {
 		w.Header().Set(headerWwwAuth, authTasked)
 		errorResponse(w, http.StatusNotFound)
 	default:
-		errorResponse(w, defaultStatus)
+		perr, ok := err.(*os.PathError)
+		if perr, ok = err.(*os.PathError); ok && perr.Err.Error() == os.ErrInvalid.Error() {
+			errorResponse(w, http.StatusBadRequest)
+		} else {
+			errorResponse(w, http.StatusInternalServerError)
+		}
 	}
 	return false
 }
@@ -132,13 +146,32 @@ func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (str
 	return cmds[0], true
 }
 
+func isOwner(fi os.FileInfo) (bool, error) {
+	user, err := user.Current()
+	if user == nil || err != nil {
+		return false, err
+	}
+	if user.Uid == strconv.Itoa(0) {
+		return true, nil
+	}
+	sstat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, nil
+	}
+	return strconv.Itoa(int(sstat.Uid)) == user.Uid, nil
+}
+
 func fileProps(w http.ResponseWriter, r *http.Request) {
 	p := path.Join(dn, r.URL.Path)
 	fi, err := os.Stat(p)
-	if !checkOsError(w, err, http.StatusBadRequest) {
+	if !checkOsError(w, err) {
 		return
 	}
-	pr := toPropertyMap(fi, false)
+	ext, err := isOwner(fi)
+	if !checkHandle(w, err == nil, http.StatusInternalServerError) {
+		return
+	}
+	pr := toPropertyMap(fi, ext)
 	js, err := json.Marshal(pr)
 	if !checkBadReq(w, err == nil) {
 		return
@@ -149,44 +182,39 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "HEAD" {
 		return
 	}
-	w.Write(js) // todo: add optional log err and if written count != len
+	w.Write(js)
 }
 
-func modFileProps(w http.ResponseWriter, r *http.Request) {
+func fileModprops(w http.ResponseWriter, r *http.Request) {
 	br := http.MaxBytesReader(w, r.Body, maxRequestBody)
 	defer doretlog42(br.Close)
 	b, err := ioutil.ReadAll(br)
 	if !checkHandle(w, err == nil, http.StatusRequestEntityTooLarge) {
 		return
 	}
-	if len(b) == 0 {
-		return
-	}
 	var m map[string]interface{}
-	err = json.Unmarshal(b, &m)
-	if !checkBadReq(w, err == nil) {
-		return
-	}
-	if len(m) == 0 {
-		return
+	if len(b) > 0 {
+		err = json.Unmarshal(b, &m)
+		if !checkBadReq(w, err == nil) {
+			return
+		}
 	}
 
 	p := path.Join(dn, r.URL.Path)
-	_, err = os.Stat(p)
-	if !checkOsError(w, err, http.StatusBadRequest) {
+	fi, err := os.Stat(p)
+	if !checkOsError(w, err) {
 		return
 	}
 
 	for k, v := range m {
 		switch k {
 		case "mode":
-			mode, ok := v.(uint32)
+			fv, ok := v.(float64)
 			if !checkBadReq(w, ok) {
 				return
 			}
-			// todo: what all can be in os.FileMode?
-			err = os.Chmod(p, os.FileMode(mode))
-			if !checkOsError(w, err, http.StatusBadRequest) {
+			err = os.Chmod(p, replaceMode(fi.Mode(), os.FileMode(fv)))
+			if !checkOsError(w, err) {
 				return
 			}
 			// case "owner":
@@ -221,7 +249,7 @@ func modprops(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	modFileProps(w, r)
+	fileModprops(w, r)
 }
 
 func get(w http.ResponseWriter, r *http.Request) {
@@ -235,12 +263,12 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	p := path.Join(dn, r.URL.Path)
 	f, err := os.Open(p)
-	if checkOsError(w, err, http.StatusBadRequest) {
+	if checkOsError(w, err) {
 		return
 	}
 	defer doretlog42(f.Close)
 	fi, err := f.Stat()
-	if checkOsError(w, err, http.StatusInternalServerError) {
+	if checkOsError(w, err) {
 		return
 	}
 	if fi.IsDir() {
@@ -256,12 +284,12 @@ func put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f, err := os.Create(path.Join(dn, r.URL.Path))
-	if checkOsError(w, err, http.StatusBadRequest) {
+	if checkOsError(w, err) {
 		return
 	}
 	defer doretlog42(f.Close)
 	_, err = io.Copy(f, r.Body)
-	checkOsError(w, err, http.StatusInternalServerError)
+	checkOsError(w, err)
 }
 
 func post(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +307,7 @@ func delete(w http.ResponseWriter, r *http.Request) {
 	if os.IsNotExist(err) {
 		return
 	}
-	checkOsError(w, err, http.StatusBadRequest)
+	checkOsError(w, err)
 }
 
 func mkdir(w http.ResponseWriter, r *http.Request) {

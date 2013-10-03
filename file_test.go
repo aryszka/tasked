@@ -13,8 +13,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/user"
 	"path"
 	"strconv"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -25,6 +28,7 @@ type fileInfo struct {
 	mode    os.FileMode
 	modTime time.Time
 	isDir   bool
+	sys     interface{}
 }
 
 func (fi *fileInfo) Name() string       { return fi.name }
@@ -32,7 +36,7 @@ func (fi *fileInfo) Size() int64        { return fi.size }
 func (fi *fileInfo) Mode() os.FileMode  { return fi.mode }
 func (fi *fileInfo) ModTime() time.Time { return fi.modTime }
 func (fi *fileInfo) IsDir() bool        { return fi.isDir }
-func (fi *fileInfo) Sys() interface{}   { return nil }
+func (fi *fileInfo) Sys() interface{}   { return fi.sys }
 
 type testHandler struct {
 	hnd func(w http.ResponseWriter, r *http.Request)
@@ -51,13 +55,14 @@ var (
 	checkBadReqHnd   = new(testHandler)
 	checkQryCmdHnd   = new(testHandler)
 	filePropsHnd     = new(testHandler)
-	modFilePropsHnd  = new(testHandler)
+	fileModpropsHnd  = new(testHandler)
 	propsHnd         = new(testHandler)
+	mx               = new(sync.Mutex)
 )
 
 func errFatal(t *testing.T, err error) {
 	if err != nil {
-		t.Fatal()
+		t.Fatal(err)
 	}
 }
 
@@ -185,6 +190,30 @@ func getFunc(c *http.Client, url string) (*http.Response, error) { return c.Get(
 // 		}, t)
 // }
 
+func convert64(m map[string]interface{}, n string) (ok bool) {
+	var (
+		v interface{}
+		f float64
+	)
+	if v, ok = m[n]; !ok || v == nil {
+		return !ok
+	}
+	if f, ok = v.(float64); !ok {
+		return false
+	}
+	m[n] = int64(f)
+	return true
+}
+
+func convertFm(pr map[string]interface{}) (ok bool) {
+	fv, ok := pr["mode"].(float64)
+	if !ok {
+		return false
+	}
+	pr["mode"] = os.FileMode(fv)
+	return true
+}
+
 func compareProperties(left, right map[string]interface{}) bool {
 	// TODO: use reflection
 	compareString := func(key string) bool {
@@ -247,29 +276,15 @@ func compareProperties(left, right map[string]interface{}) bool {
 		!compareString("name") ||
 		!compareInt64("size") ||
 		!compareInt64("modTime") ||
-		!compareBool("isDir") {
+		!compareBool("isDir") ||
+		!compareString("modeString") ||
+		!compareFileMode("mode") {
 		return false
-	}
-	if lext, ok := left["ext"]; ok {
-		lextMap, ok := lext.(map[string]interface{})
-		if !ok {
-			return false
-		}
-		rextMap, ok := right["ext"].(map[string]interface{})
-		if !ok {
-			return false
-		}
-		left, right = lextMap, rextMap
-		if len(left) != len(right) ||
-			!compareString("modeString") ||
-			!compareFileMode("mode") {
-			return false
-		}
 	}
 	return true
 }
 
-func TestPropertyMap(t *testing.T) {
+func TestToPropertyMap(t *testing.T) {
 	var (
 		defaultTime time.Time
 		defaultMode os.FileMode
@@ -298,13 +313,12 @@ func TestPropertyMap(t *testing.T) {
 	}
 	p = toPropertyMap(&fileInfo{}, true)
 	if !compareProperties(p, map[string]interface{}{
-		"name":    "",
-		"size":    int64(0),
-		"modTime": defaultTime.Unix(),
-		"isDir":   false,
-		"ext": map[string]interface{}{
-			"mode":       defaultMode,
-			"modeString": fmt.Sprint(defaultMode)}}) {
+		"name":       "",
+		"size":       int64(0),
+		"modTime":    defaultTime.Unix(),
+		"isDir":      false,
+		"mode":       defaultMode,
+		"modeString": fmt.Sprint(defaultMode)}) {
 		t.Fail()
 	}
 	p = toPropertyMap(&fileInfo{
@@ -314,13 +328,23 @@ func TestPropertyMap(t *testing.T) {
 		modTime: now,
 		isDir:   true}, true)
 	if !compareProperties(p, map[string]interface{}{
-		"name":    "some",
-		"size":    int64(42),
-		"modTime": now.Unix(),
-		"isDir":   true,
-		"ext": map[string]interface{}{
-			"mode":       os.ModePerm,
-			"modeString": fmt.Sprint(os.ModePerm)}}) {
+		"name":       "some",
+		"size":       int64(42),
+		"modTime":    now.Unix(),
+		"isDir":      true,
+		"mode":       os.ModePerm,
+		"modeString": fmt.Sprint(os.ModePerm)}) {
+		t.Fail()
+	}
+	p = toPropertyMap(&fileInfo{
+		mode: os.ModePerm + 1024}, true)
+	if !compareProperties(p, map[string]interface{}{
+		"name":       "",
+		"size":       int64(0),
+		"modTime":    defaultTime.Unix(),
+		"isDir":      false,
+		"mode":       os.ModePerm,
+		"modeString": fmt.Sprint(os.ModePerm)}) {
 		t.Fail()
 	}
 }
@@ -364,12 +388,10 @@ func TestCheckOsError(t *testing.T) {
 	server := serveTest(t, checkOsErrorHnd)
 	test := func(testErr error, status int, clb func(rsp *http.Response)) {
 		checkOsErrorHnd.hnd = func(w http.ResponseWriter, _ *http.Request) {
-			checkOsError(w, testErr, http.StatusBadRequest)
+			checkOsError(w, testErr)
 		}
 		htreq(t, "GET", server.URL, nil, func(rsp *http.Response) {
 			if rsp.StatusCode != status {
-				t.Log(status)
-				t.Log("here")
 				t.Fail()
 			}
 			if clb != nil {
@@ -379,13 +401,13 @@ func TestCheckOsError(t *testing.T) {
 	}
 
 	// 404
-	if checkOsError(httptest.NewRecorder(), os.ErrNotExist, 0) {
+	if checkOsError(httptest.NewRecorder(), os.ErrNotExist) {
 		t.Fail()
 	}
 	test(os.ErrNotExist, http.StatusNotFound, nil)
 
 	// 404 - no permission
-	if checkOsError(httptest.NewRecorder(), os.ErrPermission, 0) {
+	if checkOsError(httptest.NewRecorder(), os.ErrPermission) {
 		t.Fail()
 	}
 	test(os.ErrPermission, http.StatusNotFound, func(rsp *http.Response) {
@@ -396,13 +418,20 @@ func TestCheckOsError(t *testing.T) {
 	})
 
 	// 400
-	if checkOsError(httptest.NewRecorder(), errors.New("error"), 0) {
+	perr := &os.PathError{Err: os.ErrInvalid}
+	if checkOsError(httptest.NewRecorder(), perr) {
 		t.Fail()
 	}
-	test(errors.New("error"), http.StatusBadRequest, nil)
+	test(perr, http.StatusBadRequest, nil)
+
+	// 500
+	if checkOsError(httptest.NewRecorder(), errors.New("error")) {
+		t.Fail()
+	}
+	test(errors.New("error"), http.StatusInternalServerError, nil)
 
 	// no error
-	if !checkOsError(httptest.NewRecorder(), nil, 0) {
+	if !checkOsError(httptest.NewRecorder(), nil) {
 		t.Fail()
 	}
 	test(nil, http.StatusOK, nil)
@@ -460,7 +489,7 @@ func TestCheckBadReq(t *testing.T) {
 
 func TestCheckQryCmd(t *testing.T) {
 	server := serveTest(t, checkQryCmdHnd)
-	var mkreq = func(u string) *http.Request {
+	mkreq := func(u string) *http.Request {
 		return &http.Request{URL: &url.URL{RawQuery: u}}
 	}
 	test := func(qry string, shouldFail bool, allowed ...string) {
@@ -470,8 +499,6 @@ func TestCheckQryCmd(t *testing.T) {
 		htreq(t, "GET", server.URL+"/?"+qry, nil, func(rsp *http.Response) {
 			if shouldFail && rsp.StatusCode != http.StatusBadRequest ||
 				!shouldFail && rsp.StatusCode != http.StatusOK {
-				t.Log(shouldFail)
-				t.Log(allowed)
 				t.Fail()
 			}
 		})
@@ -510,21 +537,63 @@ func TestCheckQryCmd(t *testing.T) {
 	}
 }
 
-func TestFileProps(t *testing.T) {
-	convert64 := func(m map[string]interface{}, n string) (ok bool) {
-		var (
-			v interface{}
-			f float64
-		)
-		if v, ok = m[n]; !ok || v == nil {
-			return !ok
-		}
-		if f, ok = v.(float64); !ok {
-			return false
-		}
-		m[n] = int64(f)
-		return true
+func TestIsOwner(t *testing.T) {
+	cu, err := user.Current()
+	errFatal(t, err)
+	cui, err := strconv.Atoi(cu.Uid)
+	errFatal(t, err)
+	cuui := uint32(cui)
+
+	fi := &fileInfo{sys: &syscall.Stat_t{Uid: cuui}}
+	is, err := isOwner(fi)
+	if !is || err != nil {
+		t.Fail()
 	}
+}
+
+func TestIsOwnerNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	fi := &fileInfo{}
+	is, err := isOwner(fi)
+	if is || err != nil {
+		t.Fail()
+	}
+
+	cu, err := user.Current()
+	cui, err := strconv.Atoi(cu.Uid)
+	cuui := uint32(cui)
+	fi = &fileInfo{sys: &syscall.Stat_t{Uid: cuui + 1}}
+	is, err = isOwner(fi)
+	if is || err != nil {
+		t.Fail()
+	}
+}
+
+func TestIsOwnerRoot(t *testing.T) {
+	if !isRoot {
+		t.Skip()
+	}
+
+	fi := &fileInfo{}
+	is, err := isOwner(fi)
+	if !is || err != nil {
+		t.Fail()
+	}
+
+	cu, err := user.Current()
+	cui, err := strconv.Atoi(cu.Uid)
+	cuui := uint32(cui)
+	fi = &fileInfo{sys: &syscall.Stat_t{Uid: cuui + 1}}
+	is, err = isOwner(fi)
+	if !is || err != nil {
+		t.Fail()
+	}
+}
+
+func TestFileProps(t *testing.T) {
 	filePropsHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
 		fileProps(w, r)
 	}
@@ -546,19 +615,24 @@ func TestFileProps(t *testing.T) {
 		}
 	})
 
+	htreq(t, "PROPS", server.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
 	err = withNewFile(p, nil)
 	fiVerify, err := os.Stat(p)
 	errFatal(t, err)
-	prVerify := toPropertyMap(fiVerify, false)
+	prVerify := toPropertyMap(fiVerify, true)
 	jsVerify, err := json.Marshal(prVerify)
-
 	errFatal(t, err)
+
 	htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
 			rsp.Header.Get(headerContentType) != jsonContentType {
 			t.Fail()
 		}
-		errFatal(t, err)
 		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
 		errFatal(t, err)
 		if len(jsVerify) != clen {
@@ -571,13 +645,11 @@ func TestFileProps(t *testing.T) {
 		}
 		var pr map[string]interface{}
 		err = json.Unmarshal(js, &pr)
-		if !convert64(pr, "modTime") || !convert64(pr, "size") {
+		errFatal(t, err)
+		if !convert64(pr, "modTime") || !convert64(pr, "size") || !convertFm(pr) {
 			t.Fail()
 		}
-		errFatal(t, err)
 		if !compareProperties(pr, prVerify) {
-			t.Log(pr)
-			t.Log(prVerify)
 			t.Fail()
 		}
 	})
@@ -602,11 +674,80 @@ func TestFileProps(t *testing.T) {
 	})
 }
 
-func TestModFileProps(t *testing.T) {
-	modFilePropsHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
-		modFileProps(w, r)
+func TestFilePropsRoot(t *testing.T) {
+	// TestFilePropsRoot and TestFileModpropsRoot cannot be run together until Setuid is replaced by Seteuid
+	if !isRoot || !propsRoot {
+		t.Skip()
 	}
-	server := serveTest(t, modFilePropsHnd)
+
+	t.Parallel()
+	mx.Lock()
+	defer mx.Unlock()
+
+	server := serveTest(t, filePropsHnd)
+	fn := "some-file-uid"
+	dn = path.Join(testdir, "http")
+	ensureDir(dn)
+	p := path.Join(dn, fn)
+	url := server.URL + "/" + fn
+	err := withNewFile(p, nil)
+	errFatal(t, err)
+
+	// uid := syscall.Getuid()
+	usr, err := user.Lookup(testuser)
+	errFatal(t, err)
+	tuid, err := strconv.Atoi(usr.Uid)
+	errFatal(t, err)
+	err = syscall.Setuid(tuid)
+	errFatal(t, err)
+
+	// makes no sense at the moment
+	// defer func() {
+	// 	err = syscall.Setuid(uid)
+	// 	errFatal(t, err)
+	// }()
+
+	fiVerify, err := os.Stat(p)
+	errFatal(t, err)
+	prVerify := toPropertyMap(fiVerify, false)
+	jsVerify, err := json.Marshal(prVerify)
+	htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		errFatal(t, err)
+		if len(jsVerify) != clen {
+			t.Fail()
+		}
+		js, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if !bytes.Equal(js, jsVerify) {
+			t.Fail()
+		}
+		var pr map[string]interface{}
+		err = json.Unmarshal(js, &pr)
+		errFatal(t, err)
+		if !convert64(pr, "modTime") || !convert64(pr, "size") {
+			t.Fail()
+		}
+		if !compareProperties(pr, prVerify) {
+			t.Fail()
+		}
+	})
+}
+
+func TestFileModprops(t *testing.T) {
+	dn = path.Join(testdir, "http")
+	ensureDir(dn)
+	fn := "some-file"
+	p := path.Join(dn, fn)
+	err := withNewFile(p, nil)
+	errFatal(t, err)
+	fileModpropsHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
+		fileModprops(w, r)
+	}
+	server := serveTest(t, fileModpropsHnd)
 	mrb := maxRequestBody
 	defer func() { maxRequestBody = mrb }()
 
@@ -637,11 +778,7 @@ func TestModFileProps(t *testing.T) {
 	})
 
 	// not found
-	dn = path.Join(testdir, "http")
-	ensureDir(dn)
-	fn := "some-file"
-	p := path.Join(dn, fn)
-	err := os.Remove(p)
+	err = os.Remove(p)
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal()
 	}
@@ -650,6 +787,103 @@ func TestModFileProps(t *testing.T) {
 			t.Fail()
 		}
 	})
+
+	// bad req, path
+	htreq(t, "MODPROPS", server.URL+"/"+string([]byte{0}), bytes.NewBufferString("{\"t\":0}"),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusBadRequest {
+				t.Fail()
+			}
+		})
+
+	// mod, bad val
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString("{\"mode\": \"not a number\"}"),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusBadRequest {
+				t.Fail()
+			}
+		})
+
+	// mod, success
+	err = os.Chmod(p, os.ModePerm)
+	errFatal(t, err)
+	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			fi, err := os.Stat(p)
+			errFatal(t, err)
+			if fi.Mode() != os.FileMode(0744) {
+				t.Fail()
+			}
+		})
+
+	// mod, success, masked
+	err = os.Chmod(p, os.ModePerm)
+	errFatal(t, err)
+	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 01744)),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			fi, err := os.Stat(p)
+			errFatal(t, err)
+			if fi.Mode() != os.FileMode(0744) {
+				t.Fail()
+			}
+		})
+}
+
+func TestFileModpropsRoot(t *testing.T) {
+	// TestFilePropsRoot and TestFileModPropsRoot cannot be run together until Setuid is replaced by Seteuid
+	if !isRoot || !modpropsRoot {
+		t.Skip()
+	}
+
+	t.Parallel()
+	mx.Lock()
+	defer mx.Unlock()
+
+	server := serveTest(t, fileModpropsHnd)
+	fn := "some-file-uid-mod"
+	dn = path.Join(testdir, "http")
+	ensureDir(dn)
+	p := path.Join(dn, fn)
+	url := server.URL + "/" + fn
+	err := withNewFile(p, nil)
+	errFatal(t, err)
+	err = os.Chmod(p, os.ModePerm)
+	errFatal(t, err)
+
+	// uid := syscall.Getuid()
+	usr, err := user.Lookup(testuser)
+	errFatal(t, err)
+	tuid, err := strconv.Atoi(usr.Uid)
+	errFatal(t, err)
+	err = syscall.Setuid(tuid)
+	errFatal(t, err)
+
+	// makes no sense at the moment
+	// defer func() {
+	// 	err = syscall.Setuid(uid)
+	// 	errFatal(t, err)
+	// }()
+
+	htreq(t, "MODPROPS", url, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusNotFound ||
+				rsp.Header.Get(headerWwwAuth) != authTasked {
+				t.Fail()
+			}
+			fi, err := os.Stat(p)
+			errFatal(t, err)
+			if fi.Mode() != os.ModePerm {
+				t.Fail()
+			}
+		})
 }
 
 func TestOptions(t *testing.T) {
@@ -671,21 +905,13 @@ func TestNotSupported(t *testing.T) {
 			}
 		})
 	}
-	// TRACE
 	test("TRACE")
-
-	// CONNECT
 	test("CONNECT")
-
-	// TINAM
 	test("TINAM")
 }
 
 func TestProps(t *testing.T) {
-	propsHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
-		props(w, r)
-	}
-	server := serveTest(t, propsHnd)
+	server := serveTest(t, nil)
 	dn = path.Join(testdir, "http")
 	ensureDir(dn)
 	fn := "some-file"
@@ -700,6 +926,29 @@ func TestProps(t *testing.T) {
 		}
 	})
 	htreq(t, "PROPS", server.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+}
+
+func TestModprops(t *testing.T) {
+	server := serveTest(t, nil)
+	dn = path.Join(testdir, "http")
+	ensureDir(dn)
+	fn := "some-file"
+	p := path.Join(dn, fn)
+	err := withNewFile(p, nil)
+	if err != nil {
+		t.Fatal()
+	}
+	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+		})
+	htreq(t, "MODPROPS", server.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}

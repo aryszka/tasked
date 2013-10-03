@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/rand"
 	"errors"
+	"flag"
 	"io"
 	"os"
 	"os/user"
@@ -12,8 +13,13 @@ import (
 )
 
 var (
-	isRoot  bool
-	testdir = defaultTestdir
+	isRoot       bool
+	testdir      = defaultTestdir
+	testPam      bool
+	testuser     string
+	testpwd      string
+	propsRoot    bool
+	modpropsRoot bool
 )
 
 func init() {
@@ -45,6 +51,17 @@ func init() {
 	if err != nil {
 		panic(failedToInitTestdir)
 	}
+
+	tp := flag.Bool("test.pam", false, "")
+	tpr := flag.Bool("test.propsroot", false, "")
+	tmpr := flag.Bool("test.modpropsroot", false, "")
+	flag.Parse()
+	propsRoot = *tpr
+	modpropsRoot = *tmpr
+	testPam = *tp
+
+	testuser = envdef("testuser", "testuser")
+	testpwd = envdef("testpwd", "testpwd")
 }
 
 func envdef(key, dflt string) string {
@@ -158,22 +175,20 @@ func TestGetHttpDir(t *testing.T) {
 }
 
 func TestAuthPam(t *testing.T) {
-	if !isRoot {
+	if !isRoot || !testPam {
 		t.Skip()
 	}
-	user := envdef("testusr", "test")
-	pwd := envdef("testpwd", "testpwd")
 
-	if nil != authPam(user, pwd) {
+	if nil != authPam(testuser, testpwd) {
 		t.Fail()
 	}
-	if nil == authPam(user+"x", pwd) {
+	if nil == authPam(testuser+"x", testpwd) {
 		t.Fail()
 	}
-	if nil == authPam(user, pwd+"x") {
+	if nil == authPam(testuser, testpwd+"x") {
 		t.Fail()
 	}
-	if nil == authPam(user, "") {
+	if nil == authPam(testuser, "") {
 		t.Fail()
 	}
 	if nil == authPam("", "") {
