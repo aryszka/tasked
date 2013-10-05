@@ -15,25 +15,30 @@ import (
 )
 
 const (
-	cmdKey                = "cmd"    // querystring key for method replacement commands
-	cmdProps              = "props"  // command replacing the PROPS method
-	authTasked            = "tasked" // www-authenticate value used on no permission
+	cmdKey                = "cmd"   // querystring key for method replacement commands
+	cmdProps              = "props" // command replacing the PROPS method
 	jsonContentType       = "application/json"
 	defaultMaxRequestBody = 1 << 30               // todo: make this configurable
 	modeMask              = os.FileMode(1)<<9 - 1 // the least significant 9 bits
+
+	// not for files, because of privacy
+	authTasked = "tasked" // www-authenticate value used on no permission
 )
 
 var (
 	dn                  string // directory opened for HTTP
-	headerWwwAuth              = http.CanonicalHeaderKey("www-authenticate")
 	headerContentType          = http.CanonicalHeaderKey("content-type")
 	headerContentLength        = http.CanonicalHeaderKey("content-length")
 	maxRequestBody      int64  = defaultMaxRequestBody
+
+	// not for files, because of privacy
+	headerWwwAuth = http.CanonicalHeaderKey("www-authenticate")
 
 	// mapping from HTTP methods to functions
 	reqmap = map[string]func(http.ResponseWriter, *http.Request){
 		"OPTIONS":  options,
 		"HEAD":     get,
+		"SEARCH":   search,
 		"GET":      get,
 		"PROPS":    props,
 		"MODPROPS": modprops,
@@ -100,15 +105,16 @@ func checkOsError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 	switch {
-	case os.IsNotExist(err):
-		errorResponse(w, http.StatusNotFound)
-	case os.IsPermission(err):
-		w.Header().Set(headerWwwAuth, authTasked)
+	case os.IsNotExist(err), os.IsPermission(err):
 		errorResponse(w, http.StatusNotFound)
 	default:
-		perr, ok := err.(*os.PathError)
-		if perr, ok = err.(*os.PathError); ok && perr.Err.Error() == os.ErrInvalid.Error() {
+		if perr, ok := err.(*os.PathError); ok && perr.Err.Error() == os.ErrInvalid.Error() {
 			errorResponse(w, http.StatusBadRequest)
+		} else if serr, ok := err.(*os.SyscallError); ok {
+			if nerr, ok := serr.Err.(syscall.Errno); ok &&
+				(nerr == syscall.ENOENT || nerr == syscall.EPERM || nerr == syscall.EACCES) {
+				errorResponse(w, http.StatusNotFound)
+			}
 		} else {
 			errorResponse(w, http.StatusInternalServerError)
 		}
@@ -126,6 +132,10 @@ func checkHandle(w http.ResponseWriter, exp bool, status int) bool {
 
 func checkBadReq(w http.ResponseWriter, exp bool) bool {
 	return checkHandle(w, exp, http.StatusBadRequest)
+}
+
+func checkServerError(w http.ResponseWriter, exp bool) bool {
+	return checkHandle(w, exp, http.StatusInternalServerError)
 }
 
 func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (string, bool) {
@@ -146,19 +156,25 @@ func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (str
 	return cmds[0], true
 }
 
-func isOwner(fi os.FileInfo) (bool, error) {
-	user, err := user.Current()
-	if user == nil || err != nil {
-		return false, err
-	}
-	if user.Uid == strconv.Itoa(0) {
+func isOwner(u *user.User, fi os.FileInfo) (bool, error) {
+	if u.Uid == strconv.Itoa(0) {
 		return true, nil
 	}
 	sstat, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return false, nil
 	}
-	return strconv.Itoa(int(sstat.Uid)) == user.Uid, nil
+	return strconv.Itoa(int(sstat.Uid)) == u.Uid, nil
+}
+
+func writeJsonResponse(w http.ResponseWriter, r *http.Request, c []byte) (int, error) {
+	h := w.Header()
+	h.Set(headerContentType, jsonContentType)
+	h.Set(headerContentLength, fmt.Sprintf("%d", len(c)))
+	if r.Method == "HEAD" {
+		return 0, nil
+	}
+	return w.Write(c)
 }
 
 func fileProps(w http.ResponseWriter, r *http.Request) {
@@ -167,22 +183,29 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 	if !checkOsError(w, err) {
 		return
 	}
-	ext, err := isOwner(fi)
-	if !checkHandle(w, err == nil, http.StatusInternalServerError) {
+	u, err := user.Current()
+	if !checkServerError(w, u != nil && err == nil) {
 		return
 	}
-	pr := toPropertyMap(fi, ext)
+	own, err := isOwner(u, fi)
+	if !checkServerError(w, err == nil) {
+		return
+	}
+	pr := toPropertyMap(fi, own)
 	js, err := json.Marshal(pr)
-	if !checkBadReq(w, err == nil) {
+	if !checkServerError(w, err == nil) {
 		return
 	}
-	h := w.Header()
-	h.Set(headerContentType, jsonContentType)
-	h.Set(headerContentLength, fmt.Sprintf("%d", len(js)))
-	if r.Method == "HEAD" {
-		return
+	writeJsonResponse(w, r, js)
+}
+
+func chmod(w http.ResponseWriter, p string, fi os.FileInfo, v interface{}) bool {
+	fv, ok := v.(float64)
+	if !checkBadReq(w, ok) {
+		return false
 	}
-	w.Write(js)
+	err := os.Chmod(p, replaceMode(fi.Mode(), os.FileMode(fv)))
+	return checkOsError(w, err)
 }
 
 func fileModprops(w http.ResponseWriter, r *http.Request) {
@@ -206,15 +229,19 @@ func fileModprops(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	u, err := user.Current()
+	if !checkServerError(w, u != nil && err == nil) {
+		return
+	}
+	own, err := isOwner(u, fi)
+	if !checkServerError(w, err == nil) || !checkHandle(w, own, http.StatusNotFound) {
+		return
+	}
+
 	for k, v := range m {
 		switch k {
 		case "mode":
-			fv, ok := v.(float64)
-			if !checkBadReq(w, ok) {
-				return
-			}
-			err = os.Chmod(p, replaceMode(fi.Mode(), os.FileMode(fv)))
-			if !checkOsError(w, err) {
+			if !chmod(w, p, fi, v) {
 				return
 			}
 			// case "owner":
@@ -223,12 +250,31 @@ func fileModprops(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getDir(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
-	// check accept encoding. possible form or json, default form.
-	// value, key/merged val, url encoded form
+func getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
+	dfis, err := d.Readdir(0)
+	if !checkOsError(w, err) {
+		return
+	}
+	u, err := user.Current()
+	if !checkServerError(w, u != nil && err == nil) {
+		return
+	}
+	prs := make([]map[string]interface{}, len(dfis))
+	for i, dfi := range dfis {
+		own, err := isOwner(u, dfi)
+		if !checkServerError(w, err == nil) {
+			return
+		}
+		prs[i] = toPropertyMap(dfi, own)
+	}
+	js, err := json.Marshal(prs)
+	if !checkServerError(w, err == nil) {
+		return
+	}
+	writeJsonResponse(w, r, js)
 }
 
-func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
+func getFile(w http.ResponseWriter, r *http.Request, f *os.File) {
 	// if accept encoding doesn't match, then error
 }
 
@@ -236,20 +282,7 @@ func options(w http.ResponseWriter, r *http.Request) {
 	// no-op
 }
 
-func props(w http.ResponseWriter, r *http.Request) {
-	_, ok := checkQryCmd(w, r)
-	if !ok {
-		return
-	}
-	fileProps(w, r)
-}
-
-func modprops(w http.ResponseWriter, r *http.Request) {
-	_, ok := checkQryCmd(w, r)
-	if !ok {
-		return
-	}
-	fileModprops(w, r)
+func search(w http.ResponseWriter, r *http.Request) {
 }
 
 func get(w http.ResponseWriter, r *http.Request) {
@@ -272,10 +305,27 @@ func get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if fi.IsDir() {
-		getDir(w, r, f, fi)
-	} else {
-		getFile(w, r, f, fi)
+		getDir(w, r, f)
+		return
+
 	}
+	getFile(w, r, f)
+}
+
+func props(w http.ResponseWriter, r *http.Request) {
+	_, ok := checkQryCmd(w, r)
+	if !ok {
+		return
+	}
+	fileProps(w, r)
+}
+
+func modprops(w http.ResponseWriter, r *http.Request) {
+	_, ok := checkQryCmd(w, r)
+	if !ok {
+		return
+	}
+	fileModprops(w, r)
 }
 
 func put(w http.ResponseWriter, r *http.Request) {

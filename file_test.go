@@ -16,6 +16,7 @@ import (
 	"os/user"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -39,25 +40,20 @@ func (fi *fileInfo) IsDir() bool        { return fi.isDir }
 func (fi *fileInfo) Sys() interface{}   { return fi.sys }
 
 type testHandler struct {
-	hnd func(w http.ResponseWriter, r *http.Request)
+	sh func(w http.ResponseWriter, r *http.Request)
 }
 
 func (th *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	th.hnd(w, r)
+	if th.sh == nil {
+		panic("Test handler not initialized.")
+	}
+	th.sh(w, r)
 }
 
 var (
-	servers          = make(map[http.Handler]*httptest.Server)
-	defaultHnd       = &testHandler{hnd: handler}
-	errorResponseHnd = new(testHandler)
-	checkOsErrorHnd  = new(testHandler)
-	checkHandleHnd   = new(testHandler)
-	checkBadReqHnd   = new(testHandler)
-	checkQryCmdHnd   = new(testHandler)
-	filePropsHnd     = new(testHandler)
-	fileModpropsHnd  = new(testHandler)
-	propsHnd         = new(testHandler)
-	mx               = new(sync.Mutex)
+	thnd = new(testHandler)
+	s    *httptest.Server
+	mx   = new(sync.Mutex)
 )
 
 func errFatal(t *testing.T, err error) {
@@ -66,21 +62,14 @@ func errFatal(t *testing.T, err error) {
 	}
 }
 
-func serveTest(t *testing.T, h http.Handler) *httptest.Server {
-	if h == nil {
-		h = defaultHnd
-	}
-	s := servers[h]
-	if s != nil {
-		return s
-	}
+func init() {
 	c, err := tls.X509KeyPair([]byte(defaultTlsCert), []byte(defaultTlsKey))
-	errFatal(t, err)
-	s = httptest.NewUnstartedServer(h)
+	if err != nil {
+		panic(err)
+	}
+	s = httptest.NewUnstartedServer(thnd)
 	s.TLS = &tls.Config{Certificates: []tls.Certificate{c}}
 	s.StartTLS()
-	servers[h] = s
-	return s
 }
 
 func mkclient() *http.Client {
@@ -365,13 +354,12 @@ func TestGetValues(t *testing.T) {
 }
 
 func TestErrorResponse(t *testing.T) {
-	server := serveTest(t, errorResponseHnd)
-	testStatus := func(s int) {
-		errorResponseHnd.hnd = func(w http.ResponseWriter, _ *http.Request) {
-			errorResponse(w, s)
+	testStatus := func(status int) {
+		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
+			errorResponse(w, status)
 		}
-		htreq(t, "GET", server.URL, nil, func(rsp *http.Response) {
-			if rsp.StatusCode != s || rsp.Status != fmt.Sprintf("%d %s", s, http.StatusText(s)) {
+		htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != status || rsp.Status != fmt.Sprintf("%d %s", status, http.StatusText(status)) {
 				t.Fail()
 			}
 		})
@@ -385,12 +373,11 @@ func TestErrorResponse(t *testing.T) {
 }
 
 func TestCheckOsError(t *testing.T) {
-	server := serveTest(t, checkOsErrorHnd)
 	test := func(testErr error, status int, clb func(rsp *http.Response)) {
-		checkOsErrorHnd.hnd = func(w http.ResponseWriter, _ *http.Request) {
+		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
 			checkOsError(w, testErr)
 		}
-		htreq(t, "GET", server.URL, nil, func(rsp *http.Response) {
+		htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
 			if rsp.StatusCode != status {
 				t.Fail()
 			}
@@ -410,12 +397,7 @@ func TestCheckOsError(t *testing.T) {
 	if checkOsError(httptest.NewRecorder(), os.ErrPermission) {
 		t.Fail()
 	}
-	test(os.ErrPermission, http.StatusNotFound, func(rsp *http.Response) {
-		wah := rsp.Header[headerWwwAuth]
-		if len(wah) != 1 || wah[0] != authTasked {
-			t.Fail()
-		}
-	})
+	test(os.ErrPermission, http.StatusNotFound, nil)
 
 	// 400
 	perr := &os.PathError{Err: os.ErrInvalid}
@@ -438,12 +420,11 @@ func TestCheckOsError(t *testing.T) {
 }
 
 func TestCheckHandle(t *testing.T) {
-	server := serveTest(t, checkHandleHnd)
 	test := func(shouldFail bool, status int) {
-		checkHandleHnd.hnd = func(w http.ResponseWriter, _ *http.Request) {
+		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
 			checkHandle(w, !shouldFail, status)
 		}
-		htreq(t, "GET", server.URL, nil, func(rsp *http.Response) {
+		htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
 			if shouldFail && rsp.StatusCode != status ||
 				!shouldFail && rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -465,12 +446,11 @@ func TestCheckHandle(t *testing.T) {
 }
 
 func TestCheckBadReq(t *testing.T) {
-	server := serveTest(t, checkBadReqHnd)
 	test := func(shouldFail bool) {
-		checkBadReqHnd.hnd = func(w http.ResponseWriter, _ *http.Request) {
+		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
 			checkBadReq(w, !shouldFail)
 		}
-		htreq(t, "GET", server.URL, nil, func(rsp *http.Response) {
+		htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
 			if shouldFail && rsp.StatusCode != http.StatusBadRequest ||
 				!shouldFail && rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -487,16 +467,37 @@ func TestCheckBadReq(t *testing.T) {
 	test(false)
 }
 
+func TestCheckServerError(t *testing.T) {
+	test := func(shouldFail bool) {
+		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
+			checkServerError(w, !shouldFail)
+		}
+		htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+			if shouldFail && rsp.StatusCode != http.StatusInternalServerError ||
+				!shouldFail && rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+		})
+	}
+	if !checkBadReq(httptest.NewRecorder(), true) {
+		t.Fail()
+	}
+	test(true)
+	if checkBadReq(httptest.NewRecorder(), false) {
+		t.Fail()
+	}
+	test(false)
+}
+
 func TestCheckQryCmd(t *testing.T) {
-	server := serveTest(t, checkQryCmdHnd)
 	mkreq := func(u string) *http.Request {
 		return &http.Request{URL: &url.URL{RawQuery: u}}
 	}
 	test := func(qry string, shouldFail bool, allowed ...string) {
-		checkQryCmdHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
+		thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 			checkQryCmd(w, r, allowed...)
 		}
-		htreq(t, "GET", server.URL+"/?"+qry, nil, func(rsp *http.Response) {
+		htreq(t, "GET", s.URL+"/?"+qry, nil, func(rsp *http.Response) {
 			if shouldFail && rsp.StatusCode != http.StatusBadRequest ||
 				!shouldFail && rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -545,10 +546,49 @@ func TestIsOwner(t *testing.T) {
 	cuui := uint32(cui)
 
 	fi := &fileInfo{sys: &syscall.Stat_t{Uid: cuui}}
-	is, err := isOwner(fi)
+	is, err := isOwner(cu, fi)
 	if !is || err != nil {
 		t.Fail()
 	}
+}
+
+func TestWriteJsonResponse(t *testing.T) {
+	js := []byte("{\"some\": \"data\"}")
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		writeJsonResponse(w, r, js)
+	}
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK ||
+			rsp.Header.Get(headerContentType) != jsonContentType {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		errFatal(t, err)
+		if clen != len(js) {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if !bytes.Equal(b, js) {
+			t.Fail()
+		}
+	})
+	htreq(t, "HEAD", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK ||
+			rsp.Header.Get(headerContentType) != jsonContentType {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		errFatal(t, err)
+		if clen != len(js) {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if !bytes.Equal(b, nil) {
+			t.Fail()
+		}
+	})
 }
 
 func TestIsOwnerNotRoot(t *testing.T) {
@@ -556,17 +596,19 @@ func TestIsOwnerNotRoot(t *testing.T) {
 		t.Skip()
 	}
 
+	cu, err := user.Current()
+	errFatal(t, err)
 	fi := &fileInfo{}
-	is, err := isOwner(fi)
+	is, err := isOwner(cu, fi)
 	if is || err != nil {
 		t.Fail()
 	}
 
-	cu, err := user.Current()
 	cui, err := strconv.Atoi(cu.Uid)
+	errFatal(t, err)
 	cuui := uint32(cui)
 	fi = &fileInfo{sys: &syscall.Stat_t{Uid: cuui + 1}}
-	is, err = isOwner(fi)
+	is, err = isOwner(cu, fi)
 	if is || err != nil {
 		t.Fail()
 	}
@@ -578,44 +620,44 @@ func TestIsOwnerRoot(t *testing.T) {
 	}
 
 	fi := &fileInfo{}
-	is, err := isOwner(fi)
+	u, err := user.Current()
+	errFatal(t, err)
+	is, err := isOwner(u, fi)
 	if !is || err != nil {
 		t.Fail()
 	}
 
-	cu, err := user.Current()
-	cui, err := strconv.Atoi(cu.Uid)
+	cui, err := strconv.Atoi(u.Uid)
+	errFatal(t, err)
 	cuui := uint32(cui)
 	fi = &fileInfo{sys: &syscall.Stat_t{Uid: cuui + 1}}
-	is, err = isOwner(fi)
+	is, err = isOwner(u, fi)
 	if !is || err != nil {
 		t.Fail()
 	}
 }
 
 func TestFileProps(t *testing.T) {
-	filePropsHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileProps(w, r)
 	}
-	server := serveTest(t, filePropsHnd)
 
 	fn := "some-file"
 	dn = path.Join(testdir, "http")
-	ensureDir(dn)
+	err := ensureDir(dn)
+	errFatal(t, err)
 	p := path.Join(dn, fn)
-	url := server.URL + "/" + fn
+	url := s.URL + "/" + fn
 
-	err := os.Remove(p)
-	if !os.IsNotExist(err) {
-		errFatal(t, err)
-	}
+	err = removeIfExists(p)
+	errFatal(t, err)
 	htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
 	})
 
-	htreq(t, "PROPS", server.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
+	htreq(t, "PROPS", s.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -674,8 +716,72 @@ func TestFileProps(t *testing.T) {
 	})
 }
 
+func TestChmod(t *testing.T) {
+	rc := httptest.NewRecorder()
+	var v interface{}
+	fn := "some-file"
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+	p := path.Join(dn, fn)
+	fi, err := os.Stat(p)
+	errFatal(t, err)
+	thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
+		chmod(w, p, fi, v)
+	}
+
+	if chmod(rc, "", nil, "not float") {
+		t.Fail()
+	}
+
+	err = removeIfExists(p)
+	errFatal(t, err)
+	if chmod(rc, p, fi, float64(os.ModePerm)) {
+		t.Fail()
+	}
+
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	fi, err = os.Stat(p)
+	errFatal(t, err)
+	if !chmod(rc, p, fi, float64(fi.Mode()^os.FileMode(0111))) {
+		t.Fail()
+	}
+
+	v = "not float"
+	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	fi, err = os.Stat(p)
+	errFatal(t, err)
+	err = removeIfExists(p)
+	errFatal(t, err)
+	v = float64(fi.Mode() ^ os.FileMode(0111))
+	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	fi, err = os.Stat(p)
+	errFatal(t, err)
+	v = float64(fi.Mode() ^ os.FileMode(0111))
+	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+}
+
 func TestFilePropsRoot(t *testing.T) {
-	// TestFilePropsRoot and TestFileModpropsRoot cannot be run together until Setuid is replaced by Seteuid
+	// Tests using Setuid cannot be run together until they're replaced by Seteuid
 	if !isRoot || !propsRoot {
 		t.Skip()
 	}
@@ -684,14 +790,17 @@ func TestFilePropsRoot(t *testing.T) {
 	mx.Lock()
 	defer mx.Unlock()
 
-	server := serveTest(t, filePropsHnd)
 	fn := "some-file-uid"
 	dn = path.Join(testdir, "http")
-	ensureDir(dn)
-	p := path.Join(dn, fn)
-	url := server.URL + "/" + fn
-	err := withNewFile(p, nil)
+	err := ensureDir(dn)
 	errFatal(t, err)
+	p := path.Join(dn, fn)
+	url := s.URL + "/" + fn
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileProps(w, r)
+	}
 
 	// uid := syscall.Getuid()
 	usr, err := user.Lookup(testuser)
@@ -734,26 +843,42 @@ func TestFilePropsRoot(t *testing.T) {
 		if !compareProperties(pr, prVerify) {
 			t.Fail()
 		}
+		_, ok := pr["mode"]
+		if ok {
+			t.Fail()
+		}
+		_, ok = pr["modeString"]
+		if ok {
+			t.Fail()
+		}
+		_, ok = pr["owner"]
+		if ok {
+			t.Fail()
+		}
+		_, ok = pr["group"]
+		if ok {
+			t.Fail()
+		}
 	})
 }
 
 func TestFileModprops(t *testing.T) {
 	dn = path.Join(testdir, "http")
-	ensureDir(dn)
+	err := ensureDir(dn)
+	errFatal(t, err)
 	fn := "some-file"
 	p := path.Join(dn, fn)
-	err := withNewFile(p, nil)
+	err = withNewFile(p, nil)
 	errFatal(t, err)
-	fileModpropsHnd.hnd = func(w http.ResponseWriter, r *http.Request) {
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileModprops(w, r)
 	}
-	server := serveTest(t, fileModpropsHnd)
 	mrb := maxRequestBody
 	defer func() { maxRequestBody = mrb }()
 
 	// max req length
 	maxRequestBody = 8
-	htreq(t, "MODPROPS", server.URL, io.LimitReader(rand.Reader, maxRequestBody<<1), func(rsp *http.Response) {
+	htreq(t, "MODPROPS", s.URL, io.LimitReader(rand.Reader, maxRequestBody<<1), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusRequestEntityTooLarge {
 			t.Fail()
 		}
@@ -761,35 +886,33 @@ func TestFileModprops(t *testing.T) {
 	})
 
 	// json
-	htreq(t, "MODPROPS", server.URL, bytes.NewBufferString("not json"), func(rsp *http.Response) {
+	htreq(t, "MODPROPS", s.URL, bytes.NewBufferString("not json"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	htreq(t, "MODPROPS", server.URL, nil, func(rsp *http.Response) {
+	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
-	htreq(t, "MODPROPS", server.URL, bytes.NewBufferString("null"), func(rsp *http.Response) {
+	htreq(t, "MODPROPS", s.URL, bytes.NewBufferString("null"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
 
 	// not found
-	err = os.Remove(p)
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatal()
-	}
-	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString("{\"t\":0}"), func(rsp *http.Response) {
+	err = removeIfExists(p)
+	errFatal(t, err)
+	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString("{\"t\":0}"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
 	})
 
 	// bad req, path
-	htreq(t, "MODPROPS", server.URL+"/"+string([]byte{0}), bytes.NewBufferString("{\"t\":0}"),
+	htreq(t, "MODPROPS", s.URL+"/"+string([]byte{0}), bytes.NewBufferString("{\"t\":0}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusBadRequest {
 				t.Fail()
@@ -799,7 +922,7 @@ func TestFileModprops(t *testing.T) {
 	// mod, bad val
 	err = withNewFile(p, nil)
 	errFatal(t, err)
-	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString("{\"mode\": \"not a number\"}"),
+	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString("{\"mode\": \"not a number\"}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusBadRequest {
 				t.Fail()
@@ -809,7 +932,7 @@ func TestFileModprops(t *testing.T) {
 	// mod, success
 	err = os.Chmod(p, os.ModePerm)
 	errFatal(t, err)
-	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
+	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -824,7 +947,7 @@ func TestFileModprops(t *testing.T) {
 	// mod, success, masked
 	err = os.Chmod(p, os.ModePerm)
 	errFatal(t, err)
-	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 01744)),
+	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 01744)),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -838,7 +961,7 @@ func TestFileModprops(t *testing.T) {
 }
 
 func TestFileModpropsRoot(t *testing.T) {
-	// TestFilePropsRoot and TestFileModPropsRoot cannot be run together until Setuid is replaced by Seteuid
+	// Tests using Setuid cannot be run together until they're replaced by Seteuid
 	if !isRoot || !modpropsRoot {
 		t.Skip()
 	}
@@ -847,16 +970,19 @@ func TestFileModpropsRoot(t *testing.T) {
 	mx.Lock()
 	defer mx.Unlock()
 
-	server := serveTest(t, fileModpropsHnd)
 	fn := "some-file-uid-mod"
 	dn = path.Join(testdir, "http")
-	ensureDir(dn)
+	err := ensureDir(dn)
+	errFatal(t, err)
 	p := path.Join(dn, fn)
-	url := server.URL + "/" + fn
-	err := withNewFile(p, nil)
+	url := s.URL + "/" + fn
+	err = withNewFile(p, nil)
 	errFatal(t, err)
 	err = os.Chmod(p, os.ModePerm)
 	errFatal(t, err)
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileModprops(w, r)
+	}
 
 	// uid := syscall.Getuid()
 	usr, err := user.Lookup(testuser)
@@ -872,10 +998,10 @@ func TestFileModpropsRoot(t *testing.T) {
 	// 	errFatal(t, err)
 	// }()
 
-	htreq(t, "MODPROPS", url, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
+	htreq(t, "MODPROPS", url,
+		bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d,\"some-prop\": \"some val\"}", 0744)),
 		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusNotFound ||
-				rsp.Header.Get(headerWwwAuth) != authTasked {
+			if rsp.StatusCode != http.StatusNotFound {
 				t.Fail()
 			}
 			fi, err := os.Stat(p)
@@ -886,9 +1012,226 @@ func TestFileModpropsRoot(t *testing.T) {
 		})
 }
 
+func TestGetDir(t *testing.T) {
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+	fn := "some-dir"
+	p := path.Join(dn, fn)
+	url := s.URL + "/" + fn
+	var d *os.File
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		getDir(w, r, d)
+	}
+	mkfile := func(n string, c []byte) {
+		err := withNewFile(path.Join(p, n), func(f *os.File) error {
+			n, err := f.Write(c)
+			if n != len(c) {
+				return errors.New("Failed to write all bytes.")
+			}
+			return err
+		})
+		errFatal(t, err)
+	}
+
+	// not found
+	err = ensureDir(p)
+	errFatal(t, err)
+	err = os.Chmod(p, os.ModePerm)
+	errFatal(t, err)
+	d, err = os.Open(p)
+	errFatal(t, err)
+	err = removeIfExists(p)
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if strings.Trim(string(b), "\n") != http.StatusText(http.StatusNotFound) {
+			t.Fail()
+		}
+	})
+
+	// empty dir
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+	d, err = os.Open(p)
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		var res []interface{}
+		err = json.Unmarshal(b, &res)
+		if err != nil || len(res) > 0 {
+			t.Fail()
+		}
+	})
+
+	// dir with files
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+	mkfile("some0", nil)
+	mkfile("some1", []byte{0})
+	mkfile("some2", []byte{0, 0})
+	d, err = os.Open(p)
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		var res []map[string]interface{}
+		err = json.Unmarshal(b, &res)
+		if err != nil || len(res) > 3 {
+			t.Fail()
+		}
+		for _, m := range res {
+			n, ok := m["name"].(string)
+			if !ok {
+				t.Fail()
+			}
+			switch n {
+			case "some0", "some1", "some2":
+				if !convert64(m, "modTime") || !convert64(m, "size") || !convertFm(m) {
+					t.Fail()
+				}
+				fi, err := os.Stat(path.Join(p, n))
+				errFatal(t, err)
+				if !compareProperties(m, toPropertyMap(fi, true)) {
+					t.Fail()
+				}
+			default:
+				t.Fail()
+			}
+		}
+	})
+
+	// tests the same with HEAD
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+	mkfile("some0", nil)
+	mkfile("some1", []byte{0})
+	mkfile("some2", []byte{0, 0})
+	d, err = os.Open(p)
+	errFatal(t, err)
+	htreq(t, "HEAD", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if len(b) > 0 {
+			t.Fail()
+		}
+	})
+}
+
+func TestGetDirRoot(t *testing.T) {
+	// Tests using Setuid cannot be run together until they're replaced by Seteuid
+	if !isRoot || !getDirRoot {
+		t.Skip()
+	}
+
+	t.Parallel()
+	mx.Lock()
+	defer mx.Unlock()
+
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+	fn := "some-dir"
+	p := path.Join(dn, fn)
+	url := s.URL + "/" + fn
+	var d *os.File
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		getDir(w, r, d)
+	}
+	mkfile := func(n string, c []byte) {
+		err := withNewFile(path.Join(p, n), func(f *os.File) error {
+			n, err := f.Write(c)
+			if n != len(c) {
+				return errors.New("Failed to write all bytes.")
+			}
+			return err
+		})
+		errFatal(t, err)
+	}
+
+	mkfile("some0", nil)
+	mkfile("some1", []byte{0})
+	mkfile("some2", []byte{0, 0})
+
+	// uid := syscall.Getuid()
+	usr, err := user.Lookup(testuser)
+	errFatal(t, err)
+	tuid, err := strconv.Atoi(usr.Uid)
+	errFatal(t, err)
+	tgid, err := strconv.Atoi(usr.Gid)
+	errFatal(t, err)
+	err = os.Chown(path.Join(p, "some1"), tuid, tgid)
+	errFatal(t, err)
+	err = syscall.Setuid(tuid)
+	errFatal(t, err)
+
+	// makes no sense at the moment
+	// defer func() {
+	// 	err = syscall.Setuid(uid)
+	// 	errFatal(t, err)
+	// }()
+
+	d, err = os.Open(p)
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		var res []map[string]interface{}
+		err = json.Unmarshal(b, &res)
+		if err != nil || len(res) > 3 {
+			t.Fail()
+		}
+		for _, m := range res {
+			n, ok := m["name"].(string)
+			if !ok {
+				t.Fail()
+			}
+			switch n {
+			case "some0", "some1", "some2":
+				if !convert64(m, "modTime") || !convert64(m, "size") {
+					t.Fail()
+				}
+				if n == "some1" && !convertFm(m) {
+					t.Fail()
+				}
+				fi, err := os.Stat(path.Join(p, n))
+				errFatal(t, err)
+				if !compareProperties(m, toPropertyMap(fi, n == "some1")) {
+					t.Fail()
+				}
+			default:
+				t.Fail()
+			}
+		}
+	})
+}
+
 func TestOptions(t *testing.T) {
-	server := serveTest(t, nil)
-	htreq(t, "OPTIONS", server.URL, nil, func(rsp *http.Response) {
+	thnd.sh = handler
+	htreq(t, "OPTIONS", s.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
 			!verifyHeader(map[string][]string{"Content-Length": []string{"0"}}, rsp.Header) {
 			t.Fail()
@@ -897,9 +1240,9 @@ func TestOptions(t *testing.T) {
 }
 
 func TestNotSupported(t *testing.T) {
-	server := serveTest(t, nil)
+	thnd.sh = handler
 	test := func(method string) {
-		htreq(t, method, server.URL, nil, func(rsp *http.Response) {
+		htreq(t, method, s.URL, nil, func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusMethodNotAllowed {
 				t.Fail()
 			}
@@ -911,21 +1254,22 @@ func TestNotSupported(t *testing.T) {
 }
 
 func TestProps(t *testing.T) {
-	server := serveTest(t, nil)
+	thnd.sh = handler
 	dn = path.Join(testdir, "http")
-	ensureDir(dn)
+	err := ensureDir(dn)
+	errFatal(t, err)
 	fn := "some-file"
 	p := path.Join(dn, fn)
-	err := withNewFile(p, nil)
+	err = withNewFile(p, nil)
 	if err != nil {
 		t.Fatal()
 	}
-	htreq(t, "PROPS", server.URL+"/"+fn, nil, func(rsp *http.Response) {
+	htreq(t, "PROPS", s.URL+"/"+fn, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
-	htreq(t, "PROPS", server.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+	htreq(t, "PROPS", s.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -933,22 +1277,23 @@ func TestProps(t *testing.T) {
 }
 
 func TestModprops(t *testing.T) {
-	server := serveTest(t, nil)
+	thnd.sh = handler
 	dn = path.Join(testdir, "http")
-	ensureDir(dn)
+	err := ensureDir(dn)
+	errFatal(t, err)
 	fn := "some-file"
 	p := path.Join(dn, fn)
-	err := withNewFile(p, nil)
+	err = withNewFile(p, nil)
 	if err != nil {
 		t.Fatal()
 	}
-	htreq(t, "MODPROPS", server.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
+	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
 			}
 		})
-	htreq(t, "MODPROPS", server.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+	htreq(t, "MODPROPS", s.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}

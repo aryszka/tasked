@@ -20,6 +20,7 @@ var (
 	testpwd      string
 	propsRoot    bool
 	modpropsRoot bool
+	getDirRoot   bool
 )
 
 func init() {
@@ -55,10 +56,12 @@ func init() {
 	tp := flag.Bool("test.pam", false, "")
 	tpr := flag.Bool("test.propsroot", false, "")
 	tmpr := flag.Bool("test.modpropsroot", false, "")
+	tgdr := flag.Bool("test.getdirroot", false, "")
 	flag.Parse()
+	testPam = *tp
 	propsRoot = *tpr
 	modpropsRoot = *tmpr
-	testPam = *tp
+	getDirRoot = *tgdr
 
 	testuser = envdef("testuser", "testuser")
 	testpwd = envdef("testpwd", "testpwd")

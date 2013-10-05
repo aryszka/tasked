@@ -36,6 +36,14 @@ func withNewFile(fn string, do func(*os.File) error) error {
 	return do(f)
 }
 
+func removeIfExists(fn string) error {
+	err := os.RemoveAll(fn)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 func TestDoRetryReport(t *testing.T) {
 	// succeed first
 	c := 0
