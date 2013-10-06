@@ -12,12 +12,14 @@ import (
 	"path"
 	"strconv"
 	"syscall"
+	"mime"
+	"path/filepath"
 )
 
 const (
 	cmdKey                = "cmd"   // querystring key for method replacement commands
 	cmdProps              = "props" // command replacing the PROPS method
-	jsonContentType       = "application/json"
+	jsonContentType       = "application/json; charset=utf-8"
 	defaultMaxRequestBody = 1 << 30               // todo: make this configurable
 	modeMask              = os.FileMode(1)<<9 - 1 // the least significant 9 bits
 
@@ -274,8 +276,22 @@ func getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
 	writeJsonResponse(w, r, js)
 }
 
-func getFile(w http.ResponseWriter, r *http.Request, f *os.File) {
-	// if accept encoding doesn't match, then error
+func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
+	ct := mime.TypeByExtension(filepath.Ext(fi.Name()))
+	if len(ct) == 0 {
+		buf := make([]byte, 512)
+		n, _ := io.ReadFull(f, buf)
+		ct = http.DetectContentType(buf[:n])
+	}
+	h := w.Header()
+	h.Set(headerContentType, ct)
+	h.Set(headerContentLength, fmt.Sprintf("%d", fi.Size()))
+	if r.Method == "HEAD" {
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	f.Seek(0, os.SEEK_SET)
+	io.Copy(w, f)
 }
 
 func options(w http.ResponseWriter, r *http.Request) {
@@ -296,12 +312,12 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	p := path.Join(dn, r.URL.Path)
 	f, err := os.Open(p)
-	if checkOsError(w, err) {
+	if !checkOsError(w, err) {
 		return
 	}
 	defer doretlog42(f.Close)
 	fi, err := f.Stat()
-	if checkOsError(w, err) {
+	if !checkOsError(w, err) {
 		return
 	}
 	if fi.IsDir() {
@@ -309,7 +325,7 @@ func get(w http.ResponseWriter, r *http.Request) {
 		return
 
 	}
-	getFile(w, r, f)
+	getFile(w, r, f, fi)
 }
 
 func props(w http.ResponseWriter, r *http.Request) {

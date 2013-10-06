@@ -1229,6 +1229,122 @@ func TestGetDirRoot(t *testing.T) {
 	})
 }
 
+func TestGetFile(t *testing.T) {
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+	var (
+		f *os.File
+		fi os.FileInfo
+	)
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		getFile(w, r, f, fi)
+	}
+
+	// extension tested
+	fn := "some-file.html"
+	p := path.Join(dn, fn)
+	url := s.URL + "/" + fn
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	f, err = os.Open(p)
+	errFatal(t, err)
+	fi, err = f.Stat()
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+			t.Fail()
+		}
+	})
+	err = f.Close()
+	errFatal(t, err)
+
+	// content tested, length set, content sent
+	fn = "some-file"
+	p = path.Join(dn, fn)
+	url = s.URL + "/" + fn
+	html := []byte("<html></html>")
+	err = withNewFile(p, func(f *os.File) error {
+		_, err = f.Write(html)
+		return err
+	})
+	errFatal(t, err)
+	f, err = os.Open(p)
+	errFatal(t, err)
+	fi, err = f.Stat()
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		errFatal(t, err)
+		if clen != len(html) {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if !bytes.Equal(b, html) {
+			t.Fail()
+		}
+	})
+	err = f.Close()
+	errFatal(t, err)
+
+	// HEAD handled
+	f, err = os.Open(p)
+	errFatal(t, err)
+	fi, err = f.Stat()
+	errFatal(t, err)
+	htreq(t, "HEAD", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		errFatal(t, err)
+		if clen != len(html) {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if len(b) != 0 {
+			t.Fail()
+		}
+	})
+	err = f.Close()
+	errFatal(t, err)
+
+	// emulate copy failure
+	// file handler still open, but file deleted, can't help this without performance penalty
+	f, err = os.Open(p)
+	errFatal(t, err)
+	fi, err = f.Stat()
+	errFatal(t, err)
+	err = os.Remove(p)
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		errFatal(t, err)
+		if clen != len(html) {
+			t.Fail()
+		}
+	})
+	err = f.Close()
+	errFatal(t, err)
+}
+
 func TestOptions(t *testing.T) {
 	thnd.sh = handler
 	htreq(t, "OPTIONS", s.URL, nil, func(rsp *http.Response) {
