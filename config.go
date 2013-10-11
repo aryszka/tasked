@@ -27,6 +27,9 @@ type ReadConf struct {
 		TlsCertPath string
 		Address     string
 	}
+	Files struct {
+		MaxSearchResults int
+	}
 }
 
 // Structure holding application settings.
@@ -44,6 +47,11 @@ type config struct {
 			cert []byte
 		}
 		address string
+	}
+	files struct {
+		search struct {
+			maxResults int
+		}
 	}
 }
 
@@ -72,6 +80,32 @@ func getConfdir() (string, error) {
 	return path.Join(dir, configDefaultDir), nil
 }
 
+func evalFile(path string, val *[]byte) error {
+	if len(path) == 0 {
+		return nil
+	}
+	c, err := ioutil.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	*val = c
+	return nil
+}
+
+func evalIntP(inval int, val *int) {
+	if inval <= 0 {
+		return
+	}
+	*val = inval
+}
+
+func evalString(inval string, val *string) {
+	if len(inval) == 0 {
+		return
+	}
+	*val = inval
+}
+
 // Reads the specified configuration file into cfg.
 func readConfig(fn string) error {
 	rcfg := &ReadConf{}
@@ -80,36 +114,23 @@ func readConfig(fn string) error {
 		return err
 	}
 
-	if len(rcfg.Sec.AesKeyPath) > 0 {
-		cfg.sec.aes.key, err = ioutil.ReadFile(rcfg.Sec.AesKeyPath)
-		if err != nil {
-			return err
-		}
+	if err = evalFile(rcfg.Sec.AesKeyPath, &cfg.sec.aes.key); err != nil {
+		return err
 	}
-	if len(rcfg.Sec.AesIvPath) > 0 {
-		cfg.sec.aes.iv, err = ioutil.ReadFile(rcfg.Sec.AesIvPath)
-		if err != nil {
-			return err
-		}
+	if err = evalFile(rcfg.Sec.AesIvPath, &cfg.sec.aes.iv); err != nil {
+		return err
 	}
-	if rcfg.Sec.TokenValiditySecs > 0 {
-		cfg.sec.tokenValidity = rcfg.Sec.TokenValiditySecs
+	evalIntP(rcfg.Sec.TokenValiditySecs, &cfg.sec.tokenValidity)
+
+	if err = evalFile(rcfg.Http.TlsKeyPath, &cfg.http.tls.key); err != nil {
+		return err
 	}
-	if len(rcfg.Http.TlsKeyPath) > 0 {
-		cfg.http.tls.key, err = ioutil.ReadFile(rcfg.Http.TlsKeyPath)
-		if err != nil {
-			return err
-		}
+	if err = evalFile(rcfg.Http.TlsCertPath, &cfg.http.tls.cert); err != nil {
+		return err
 	}
-	if len(rcfg.Http.TlsCertPath) > 0 {
-		cfg.http.tls.cert, err = ioutil.ReadFile(rcfg.Http.TlsCertPath)
-		if err != nil {
-			return err
-		}
-	}
-	if len(rcfg.Http.Address) > 0 {
-		cfg.http.address = rcfg.Http.Address
-	}
+	evalString(rcfg.Http.Address, &cfg.http.address)
+
+	evalIntP(rcfg.Files.MaxSearchResults, &cfg.files.search.maxResults)
 
 	return nil
 }

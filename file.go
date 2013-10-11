@@ -1,31 +1,51 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/user"
 	"path"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"syscall"
-	"mime"
-	"path/filepath"
+	"time"
 )
 
 const (
-	cmdKey                = "cmd"   // querystring key for method replacement commands
-	cmdProps              = "props" // command replacing the PROPS method
-	jsonContentType       = "application/json; charset=utf-8"
-	defaultMaxRequestBody = 1 << 30               // todo: make this configurable
-	modeMask              = os.FileMode(1)<<9 - 1 // the least significant 9 bits
+	cmdKey                  = "cmd"   // querystring key for method replacement commands
+	cmdProps                = "props" // command replacing the PROPS method
+	cmdSearch               = "search"
+	jsonContentType         = "application/json; charset=utf-8"
+	defaultMaxRequestBody   = 1 << 30               // todo: make this configurable
+	modeMask                = os.FileMode(1)<<9 - 1 // the least significant 9 bits
+	defaultMaxSearchResults = 30
+	searchQueryMax          = "max"
+	searchQueryName         = "name"
+	searchQueryContent      = "content"
 
 	// not for files, because of privacy
 	authTasked = "tasked" // www-authenticate value used on no permission
 )
+
+type fileInfo struct {
+	sys     os.FileInfo
+	dirname string
+}
+
+func (fi *fileInfo) Name() string       { return fi.sys.Name() }
+func (fi *fileInfo) Size() int64        { return fi.sys.Size() }
+func (fi *fileInfo) Mode() os.FileMode  { return fi.sys.Mode() }
+func (fi *fileInfo) ModTime() time.Time { return fi.sys.ModTime() }
+func (fi *fileInfo) IsDir() bool        { return fi.sys.IsDir() }
+func (fi *fileInfo) Sys() interface{}   { return fi.sys.Sys() }
 
 var (
 	dn                  string // directory opened for HTTP
@@ -50,6 +70,14 @@ var (
 		"RENAME":   rename,
 		"DELETE":   delete,
 		"MKDIR":    mkdir}
+	textMimeTypes = map[string]string{
+		"css":    "text/css; charset=utf-8",
+		"html":   "text/html; charset=utf-8",
+		"js":     "application/x-javascript",
+		"xml":    "text/xml; charset=utf-8",
+		"txt":    "text/plain; charset=utf-8",
+		"txt16l": "text/plain; charset=utf-16le",
+		"txt16b": "text/plain; charset=utf-16be"}
 )
 
 func replaceMode(n, m os.FileMode) os.FileMode {
@@ -68,6 +96,9 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 		m["mode"] = mm
 		// missing:
 		// - owner, group, accessTime, changeTime
+	}
+	if fii, ok := fi.(*fileInfo); ok {
+		m["dirname"] = fii.dirname
 	}
 	return m
 }
@@ -140,12 +171,8 @@ func checkServerError(w http.ResponseWriter, exp bool) bool {
 	return checkHandle(w, exp, http.StatusInternalServerError)
 }
 
-func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (string, bool) {
-	p, err := url.ParseQuery(r.URL.RawQuery)
-	if !checkBadReq(w, err == nil) {
-		return "", false
-	}
-	cmds, ok := getValues(p, cmdKey, allowed...)
+func checkQryValuesCmd(w http.ResponseWriter, qry url.Values, allowed ...string) (string, bool) {
+	cmds, ok := getValues(qry, cmdKey, allowed...)
 	if !checkBadReq(w, ok) {
 		return "", false
 	}
@@ -156,6 +183,14 @@ func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (str
 		return "", false
 	}
 	return cmds[0], true
+}
+
+func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (string, bool) {
+	p, err := url.ParseQuery(r.URL.RawQuery)
+	if !checkBadReq(w, err == nil) {
+		return "", false
+	}
+	return checkQryValuesCmd(w, p, allowed...)
 }
 
 func isOwner(u *user.User, fi os.FileInfo) (bool, error) {
@@ -179,6 +214,143 @@ func writeJsonResponse(w http.ResponseWriter, r *http.Request, c []byte) (int, e
 	return w.Write(c)
 }
 
+func detectContentType(name string, f *os.File) (ct string, err error) {
+	ct = mime.TypeByExtension(filepath.Ext(name))
+	if len(ct) > 0 {
+		return
+	}
+	buf := make([]byte, 512)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return
+	}
+	_, err = f.Seek(0, os.SEEK_SET)
+	if err != nil {
+		return
+	}
+	ct = http.DetectContentType(buf[:n])
+	return
+}
+
+// Executes breadth first file search with a limit on the number of the results.
+func searchFiles(dirs []*fileInfo, max int, qry func(fi *fileInfo) bool) []*fileInfo {
+	if max <= 0 || len(dirs) == 0 {
+		return nil
+	}
+	var res []*fileInfo
+	di := dirs[0]
+	dirs = dirs[1:]
+	p := path.Join(di.dirname, di.Name())
+	if d, err := os.Open(p); err == nil {
+		defer doretlog42(d.Close)
+		if fis, err := d.Readdir(0); err == nil {
+			for _, fi := range fis {
+				fii := &fileInfo{sys: fi, dirname: p}
+				if qry(fii) {
+					res = append(res, fii)
+					max = max - 1
+					if max == 0 {
+						return res
+					}
+				}
+				if fii.IsDir() {
+					dirs = append(dirs, fii)
+				}
+			}
+		}
+	}
+	return append(res, searchFiles(dirs, max, qry)...)
+}
+
+func fileSearch(w http.ResponseWriter, r *http.Request, qry url.Values) {
+	var err error
+	max := defaultMaxSearchResults
+	if qryMax, ok := qry[searchQueryMax]; ok {
+		if !checkBadReq(w, len(qryMax) == 1) {
+			return
+		}
+		max, err = strconv.Atoi(qryMax[0])
+		if !checkBadReq(w, err == nil) {
+			return
+		}
+		if max > defaultMaxSearchResults {
+			max = defaultMaxSearchResults
+		}
+	}
+	names := qry[searchQueryName]
+	if !checkBadReq(w, len(names) < 2) {
+		return
+	}
+	contents := qry[searchQueryContent]
+	if !checkBadReq(w, len(contents) < 2) {
+		return
+	}
+	var name, content string
+	if len(names) > 0 {
+		name = names[0]
+	}
+	if len(contents) > 0 {
+		content = contents[0]
+	}
+	var rxn, rxc *regexp.Regexp
+	if len(name) > 0 {
+		rxn, err = regexp.Compile(name)
+		if !checkBadReq(w, err == nil) {
+			return
+		}
+	}
+	if len(content) > 0 {
+		rxc, err = regexp.Compile(content)
+		if !checkBadReq(w, err == nil) {
+			return
+		}
+	}
+	p := path.Join(dn, r.URL.Path)
+	di, err := os.Lstat(p)
+	if !checkOsError(w, err) {
+		return
+	}
+	result := searchFiles([]*fileInfo{&fileInfo{sys: di, dirname: path.Dir(p)}}, max, func(fi *fileInfo) bool {
+		if len(name) > 0 && !rxn.MatchString(fi.Name()) {
+			return false
+		}
+		if len(content) > 0 {
+			if fi.IsDir() {
+				return false
+			}
+			f, err := os.Open(path.Join(fi.dirname, fi.Name()))
+			if err != nil {
+				return false
+			}
+			defer doretlog42(f.Close)
+			ct, err := detectContentType(fi.Name(), f)
+			if err != nil {
+				return false
+			}
+			textType := false
+			for _, tct := range textMimeTypes {
+				if tct == ct {
+					textType = true
+					break
+				}
+			}
+			if !textType || !rxc.MatchReader(bufio.NewReader(f)) {
+				return false
+			}
+		}
+		return true
+	})
+	pmaps := make([]map[string]interface{}, len(result))
+	for i, fi := range result {
+		pmaps[i] = toPropertyMap(fi, false)
+	}
+	js, err := json.Marshal(pmaps)
+	if !checkServerError(w, err == nil) {
+		return
+	}
+	writeJsonResponse(w, r, js)
+}
+
 func fileProps(w http.ResponseWriter, r *http.Request) {
 	p := path.Join(dn, r.URL.Path)
 	fi, err := os.Stat(p)
@@ -199,15 +371,6 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJsonResponse(w, r, js)
-}
-
-func chmod(w http.ResponseWriter, p string, fi os.FileInfo, v interface{}) bool {
-	fv, ok := v.(float64)
-	if !checkBadReq(w, ok) {
-		return false
-	}
-	err := os.Chmod(p, replaceMode(fi.Mode(), os.FileMode(fv)))
-	return checkOsError(w, err)
 }
 
 func fileModprops(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +406,12 @@ func fileModprops(w http.ResponseWriter, r *http.Request) {
 	for k, v := range m {
 		switch k {
 		case "mode":
-			if !chmod(w, p, fi, v) {
+			fv, ok := v.(float64)
+			if !checkBadReq(w, ok) {
+				return
+			}
+			err := os.Chmod(p, replaceMode(fi.Mode(), os.FileMode(fv)))
+			if !checkOsError(w, err) {
 				return
 			}
 			// case "owner":
@@ -277,11 +445,10 @@ func getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
 }
 
 func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
-	ct := mime.TypeByExtension(filepath.Ext(fi.Name()))
-	if len(ct) == 0 {
-		buf := make([]byte, 512)
-		n, _ := io.ReadFull(f, buf)
-		ct = http.DetectContentType(buf[:n])
+	// here a couple of seek/read errors may appear
+	ct, err := detectContentType(fi.Name(), f)
+	if !checkServerError(w, err == nil) {
+		return
 	}
 	h := w.Header()
 	h.Set(headerContentType, ct)
@@ -290,7 +457,6 @@ func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	f.Seek(0, os.SEEK_SET)
 	io.Copy(w, f)
 }
 
@@ -299,15 +465,31 @@ func options(w http.ResponseWriter, r *http.Request) {
 }
 
 func search(w http.ResponseWriter, r *http.Request) {
+	qry, err := url.ParseQuery(r.URL.RawQuery)
+	if !checkBadReq(w, err == nil) {
+		return
+	}
+	if _, ok := checkQryValuesCmd(w, qry); !ok {
+		return
+	}
+	fileSearch(w, r, qry)
 }
 
 func get(w http.ResponseWriter, r *http.Request) {
-	cmd, ok := checkQryCmd(w, r, cmdProps)
+	qry, err := url.ParseQuery(r.URL.RawQuery)
+	if !checkBadReq(w, err == nil) {
+		return
+	}
+	cmd, ok := checkQryValuesCmd(w, qry, cmdProps, cmdSearch)
 	if !ok {
 		return
 	}
-	if cmd == cmdProps {
+	switch cmd {
+	case cmdProps:
 		fileProps(w, r)
+		return
+	case cmdSearch:
+		fileSearch(w, r, qry)
 		return
 	}
 	p := path.Join(dn, r.URL.Path)

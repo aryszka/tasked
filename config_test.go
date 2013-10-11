@@ -14,7 +14,8 @@ const (
 )
 
 var (
-	testTokenValidity = 1200
+	testTokenValidity    = 1200
+	testMaxSearchResults = 30
 )
 
 // duplicate
@@ -91,6 +92,64 @@ func TestGetConfdir(t *testing.T) {
 	})
 }
 
+func TestEvalFile(t *testing.T) {
+	dir := path.Join(testdir, "config")
+	err := ensureDir(dir)
+	errFatal(t, err)
+	p := path.Join(testdir, "some")
+
+	err = evalFile("", nil)
+	if err != nil {
+		t.Fail()
+	}
+
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = evalFile(p, nil)
+	if err == nil {
+		t.Fail()
+	}
+
+	err = withNewFile(p, func(f *os.File) error {
+		_, err := f.Write([]byte("some"))
+		return err
+	})
+	errFatal(t, err)
+	var b []byte
+	err = evalFile(p, &b)
+	if err != nil || !bytes.Equal(b, []byte("some")) {
+		t.Fail()
+	}
+}
+
+func TestEvalIntP(t *testing.T) {
+	i := -42
+	evalIntP(-1, &i)
+	if i != -42 {
+		t.Fail()
+	}
+	evalIntP(0, &i)
+	if i != -42 {
+		t.Fail()
+	}
+	evalIntP(42, &i)
+	if i != 42 {
+		t.Fail()
+	}
+}
+
+func TestEvalString(t *testing.T) {
+	s := "some-before"
+	evalString("", &s)
+	if s != "some-before" {
+		t.Fail()
+	}
+	evalString("some-after", &s)
+	if s != "some-after" {
+		t.Fail()
+	}
+}
+
 func TestReadConfig(t *testing.T) {
 	const (
 		syserr        = "Cannot create test file."
@@ -103,7 +162,8 @@ func TestReadConfig(t *testing.T) {
 			left.sec.tokenValidity == right.sec.tokenValidity &&
 			bytes.Equal(left.http.tls.key, right.http.tls.key) &&
 			bytes.Equal(left.http.tls.cert, right.http.tls.cert) &&
-			left.http.address == right.http.address
+			left.http.address == right.http.address &&
+			left.files.search.maxResults == right.files.search.maxResults
 	}
 
 	fn := path.Join(testdir, configTestDir)
@@ -214,7 +274,9 @@ func TestReadConfig(t *testing.T) {
 			print("[Http]\n") &&
 			print("tlskeypath = %s\n", tlsKeypath) &&
 			print("tlscertpath = %s\n", tlsCertpath) &&
-			print("address = %s", ":9091")) {
+			print("address = %s\n", ":9091") &&
+			print("[Files]\n") &&
+			print("maxsearchresults = %d\n", testMaxSearchResults)) {
 			return errors.New(syserr)
 		}
 		return nil

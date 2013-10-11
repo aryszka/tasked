@@ -88,3 +88,9 @@ func TestDoRetryReport(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func errFatal(t *testing.T, err error) {
+	if err != nil {
+		t.Fatal(err)
+	}
+}

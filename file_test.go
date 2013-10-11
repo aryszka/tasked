@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-type fileInfo struct {
+type fileInfoT struct {
 	name    string
 	size    int64
 	mode    os.FileMode
@@ -32,12 +32,12 @@ type fileInfo struct {
 	sys     interface{}
 }
 
-func (fi *fileInfo) Name() string       { return fi.name }
-func (fi *fileInfo) Size() int64        { return fi.size }
-func (fi *fileInfo) Mode() os.FileMode  { return fi.mode }
-func (fi *fileInfo) ModTime() time.Time { return fi.modTime }
-func (fi *fileInfo) IsDir() bool        { return fi.isDir }
-func (fi *fileInfo) Sys() interface{}   { return fi.sys }
+func (fi *fileInfoT) Name() string       { return fi.name }
+func (fi *fileInfoT) Size() int64        { return fi.size }
+func (fi *fileInfoT) Mode() os.FileMode  { return fi.mode }
+func (fi *fileInfoT) ModTime() time.Time { return fi.modTime }
+func (fi *fileInfoT) IsDir() bool        { return fi.isDir }
+func (fi *fileInfoT) Sys() interface{}   { return fi.sys }
 
 type testHandler struct {
 	sh func(w http.ResponseWriter, r *http.Request)
@@ -55,12 +55,6 @@ var (
 	s    *httptest.Server
 	mx   = new(sync.Mutex)
 )
-
-func errFatal(t *testing.T, err error) {
-	if err != nil {
-		t.Fatal(err)
-	}
-}
 
 func init() {
 	c, err := tls.X509KeyPair([]byte(defaultTlsCert), []byte(defaultTlsKey))
@@ -278,7 +272,7 @@ func TestToPropertyMap(t *testing.T) {
 		defaultTime time.Time
 		defaultMode os.FileMode
 	)
-	p := toPropertyMap(&fileInfo{}, false)
+	p := toPropertyMap(&fileInfoT{}, false)
 	if !compareProperties(p, map[string]interface{}{
 		"name":    "",
 		"size":    int64(0),
@@ -287,7 +281,7 @@ func TestToPropertyMap(t *testing.T) {
 		t.Fail()
 	}
 	now := time.Now()
-	p = toPropertyMap(&fileInfo{
+	p = toPropertyMap(&fileInfoT{
 		name:    "some",
 		size:    42,
 		mode:    os.ModePerm,
@@ -300,7 +294,7 @@ func TestToPropertyMap(t *testing.T) {
 		"isDir":   true}) {
 		t.Fail()
 	}
-	p = toPropertyMap(&fileInfo{}, true)
+	p = toPropertyMap(&fileInfoT{}, true)
 	if !compareProperties(p, map[string]interface{}{
 		"name":       "",
 		"size":       int64(0),
@@ -310,7 +304,7 @@ func TestToPropertyMap(t *testing.T) {
 		"modeString": fmt.Sprint(defaultMode)}) {
 		t.Fail()
 	}
-	p = toPropertyMap(&fileInfo{
+	p = toPropertyMap(&fileInfoT{
 		name:    "some",
 		size:    42,
 		mode:    os.ModePerm,
@@ -325,7 +319,7 @@ func TestToPropertyMap(t *testing.T) {
 		"modeString": fmt.Sprint(os.ModePerm)}) {
 		t.Fail()
 	}
-	p = toPropertyMap(&fileInfo{
+	p = toPropertyMap(&fileInfoT{
 		mode: os.ModePerm + 1024}, true)
 	if !compareProperties(p, map[string]interface{}{
 		"name":       "",
@@ -334,6 +328,18 @@ func TestToPropertyMap(t *testing.T) {
 		"isDir":      false,
 		"mode":       os.ModePerm,
 		"modeString": fmt.Sprint(os.ModePerm)}) {
+		t.Fail()
+	}
+	p = toPropertyMap(&fileInfo{
+		sys: &fileInfoT{mode: os.ModePerm + 1024}}, true)
+	if !compareProperties(p, map[string]interface{}{
+		"name":       "",
+		"size":       int64(0),
+		"modTime":    defaultTime.Unix(),
+		"isDir":      false,
+		"mode":       os.ModePerm,
+		"modeString": fmt.Sprint(os.ModePerm),
+		"dirname":    "/"}) {
 		t.Fail()
 	}
 }
@@ -545,7 +551,7 @@ func TestIsOwner(t *testing.T) {
 	errFatal(t, err)
 	cuui := uint32(cui)
 
-	fi := &fileInfo{sys: &syscall.Stat_t{Uid: cuui}}
+	fi := &fileInfoT{sys: &syscall.Stat_t{Uid: cuui}}
 	is, err := isOwner(cu, fi)
 	if !is || err != nil {
 		t.Fail()
@@ -598,7 +604,7 @@ func TestIsOwnerNotRoot(t *testing.T) {
 
 	cu, err := user.Current()
 	errFatal(t, err)
-	fi := &fileInfo{}
+	fi := &fileInfoT{}
 	is, err := isOwner(cu, fi)
 	if is || err != nil {
 		t.Fail()
@@ -607,7 +613,7 @@ func TestIsOwnerNotRoot(t *testing.T) {
 	cui, err := strconv.Atoi(cu.Uid)
 	errFatal(t, err)
 	cuui := uint32(cui)
-	fi = &fileInfo{sys: &syscall.Stat_t{Uid: cuui + 1}}
+	fi = &fileInfoT{sys: &syscall.Stat_t{Uid: cuui + 1}}
 	is, err = isOwner(cu, fi)
 	if is || err != nil {
 		t.Fail()
@@ -619,7 +625,7 @@ func TestIsOwnerRoot(t *testing.T) {
 		t.Skip()
 	}
 
-	fi := &fileInfo{}
+	fi := &fileInfoT{}
 	u, err := user.Current()
 	errFatal(t, err)
 	is, err := isOwner(u, fi)
@@ -630,11 +636,458 @@ func TestIsOwnerRoot(t *testing.T) {
 	cui, err := strconv.Atoi(u.Uid)
 	errFatal(t, err)
 	cuui := uint32(cui)
-	fi = &fileInfo{sys: &syscall.Stat_t{Uid: cuui + 1}}
+	fi = &fileInfoT{sys: &syscall.Stat_t{Uid: cuui + 1}}
 	is, err = isOwner(u, fi)
 	if !is || err != nil {
 		t.Fail()
 	}
+}
+
+func TestDetectContentType(t *testing.T) {
+	ct, err := detectContentType("some.html", nil)
+	if err != nil || ct != textMimeTypes["html"] {
+		t.Fail()
+	}
+	p := path.Join(testdir, "some-file")
+	err = withNewFile(p, func(f *os.File) error {
+		_, err := f.Write([]byte("This suppose to be some human readable text."))
+		return err
+	})
+	errFatal(t, err)
+	f, err := os.Open(p)
+	errFatal(t, err)
+	ct, err = detectContentType("some-file", f)
+	if err != nil || ct != textMimeTypes["txt"] {
+		t.Fail()
+	}
+}
+
+func TestSearchFiles(t *testing.T) {
+	p := path.Join(testdir, "search")
+	err := removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+	di, err := os.Lstat(p)
+	errFatal(t, err)
+	dii := &fileInfo{sys: di, dirname: testdir}
+	err = withNewFile(path.Join(p, "file0"), nil)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "file1"), nil)
+	errFatal(t, err)
+
+	// 0 max
+	if len(searchFiles([]*fileInfo{dii}, 0, func(_ *fileInfo) bool { return true })) != 0 {
+		t.Fail()
+	}
+
+	// negative max
+	if len(searchFiles([]*fileInfo{dii}, -1, func(_ *fileInfo) bool { return true })) != 0 {
+		t.Fail()
+	}
+
+	// no root dirs
+	if len(searchFiles(nil, 1, func(_ *fileInfo) bool { return true })) != 0 {
+		t.Fail()
+	}
+
+	// not existing root dirs
+	err = removeIfExists(p)
+	errFatal(t, err)
+	if len(searchFiles([]*fileInfo{dii}, 1, func(_ *fileInfo) bool { return true })) != 0 {
+		t.Fail()
+	}
+
+	// predicate always false
+	err = ensureDir(p)
+	errFatal(t, err)
+	di, err = os.Lstat(p)
+	errFatal(t, err)
+	dii = &fileInfo{sys: di, dirname: testdir}
+	err = withNewFile(path.Join(p, "file0"), nil)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "file1"), nil)
+	errFatal(t, err)
+	if len(searchFiles([]*fileInfo{dii}, 42, func(_ *fileInfo) bool { return false })) != 0 {
+		t.Fail()
+	}
+
+	// predicate always true
+	result := searchFiles([]*fileInfo{dii}, 42, func(_ *fileInfo) bool { return true })
+	if len(result) != 2 {
+		t.Fail()
+	}
+
+	// root is a file
+	fi, err := os.Lstat(path.Join(p, "file0"))
+	errFatal(t, err)
+	if len(searchFiles([]*fileInfo{&fileInfo{sys: fi, dirname: p}}, 42,
+		func(_ *fileInfo) bool { return true })) != 0 {
+		t.Fail()
+	}
+
+	// find all in a recursively
+	err = ensureDir(p)
+	errFatal(t, err)
+	di, err = os.Lstat(p)
+	dii = &fileInfo{sys: di, dirname: testdir}
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "file0"), nil)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "file1"), nil)
+	errFatal(t, err)
+	p0 := path.Join(p, "dir0")
+	err = ensureDir(p0)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p0, "file0"), nil)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p0, "file1"), nil)
+	errFatal(t, err)
+	result = searchFiles([]*fileInfo{dii}, 42, func(_ *fileInfo) bool { return true })
+	if len(result) != 5 {
+		t.Fail()
+	}
+	m := make(map[string]int)
+	for _, fii := range result {
+		m[path.Join(fii.dirname, fii.Name())] = 1
+	}
+	if len(m) != len(result) {
+		t.Fail()
+	}
+
+	// find max, breadth first
+	result = searchFiles([]*fileInfo{dii}, 4, func(_ *fileInfo) bool { return true })
+	if len(result) != 4 {
+		t.Fail()
+	}
+	var oneOfThem bool
+	for _, fii := range result {
+		if path.Join(fii.dirname, fii.Name()) == path.Join(p0, "file0") ||
+			path.Join(fii.dirname, fii.Name()) == path.Join(p0, "file1") {
+			if oneOfThem {
+				t.Fail()
+			}
+			oneOfThem = true
+		}
+	}
+
+	// find all, filtered
+	if len(searchFiles([]*fileInfo{dii}, 42, func(fi *fileInfo) bool {
+		return fi.Name() == "file0"
+	})) != 2 {
+		t.Fail()
+	}
+	if len(searchFiles([]*fileInfo{dii}, 42, func(fi *fileInfo) bool {
+		return strings.Index(fi.Name(), "file") == 0
+	})) != 4 {
+		t.Fail()
+	}
+
+	// find max, filtered, step levels
+	// don't count max for stepping directories
+	// (failure was: Readdir(max))
+	p1 := path.Join(p, "dir1")
+	err = ensureDir(p1)
+	errFatal(t, err)
+	if len(searchFiles([]*fileInfo{dii}, 2, func(fi *fileInfo) bool {
+		if fi.Name() == "dir0" {
+			err = os.Rename(path.Join(p0, "file0"), path.Join(p1, "file0"))
+			errFatal(t, err)
+			return false
+		}
+		return fi.Name() == "file0"
+	})) != 2 {
+		t.Fail()
+	}
+	err = os.Rename(path.Join(p1, "file0"), path.Join(p1, "file0"))
+	errFatal(t, err)
+	err = os.RemoveAll(p1)
+	errFatal(t, err)
+
+	// find all dirs, too
+	p1 = path.Join(p0, "dir1")
+	ensureDir(p1)
+	errFatal(t, err)
+	p2 := path.Join(p0, "dir2")
+	ensureDir(p2)
+	errFatal(t, err)
+	if len(searchFiles([]*fileInfo{dii}, 42, func(fi *fileInfo) bool {
+		return strings.Index(fi.Name(), "dir") == 0
+	})) != 3 {
+		t.Fail()
+	}
+
+	// verify data
+	err = withNewFile(path.Join(p, "file1"), func(f *os.File) error {
+		_, err := f.Write([]byte("012345678"))
+		return err
+	})
+	errFatal(t, err)
+	err = withNewFile(path.Join(p0, "file0"), func(f *os.File) error {
+		_, err := f.Write([]byte("012345"))
+		return err
+	})
+	errFatal(t, err)
+	sizeOfADir := dii.Size()
+	vm := map[string]map[string]interface{}{
+		path.Join(p, "dir0"): map[string]interface{}{
+			"name":    "dir0",
+			"dirname": p,
+			"isDir":   true,
+			"size":    sizeOfADir},
+		path.Join(p0, "dir1"): map[string]interface{}{
+			"name":    "dir1",
+			"dirname": p0,
+			"isDir":   true,
+			"size":    sizeOfADir},
+		path.Join(p0, "dir2"): map[string]interface{}{
+			"name":    "dir2",
+			"dirname": p0,
+			"isDir":   true,
+			"size":    sizeOfADir},
+		path.Join(p, "file0"): map[string]interface{}{
+			"name":    "file0",
+			"dirname": p,
+			"isDir":   false,
+			"size":    int64(0)},
+		path.Join(p, "file1"): map[string]interface{}{
+			"name":    "file1",
+			"dirname": p,
+			"isDir":   false,
+			"size":    int64(9)},
+		path.Join(p0, "file0"): map[string]interface{}{
+			"name":    "file0",
+			"dirname": p0,
+			"isDir":   false,
+			"size":    int64(6)},
+		path.Join(p0, "file1"): map[string]interface{}{
+			"name":    "file1",
+			"dirname": p0,
+			"isDir":   false,
+			"size":    int64(0)}}
+	result = searchFiles([]*fileInfo{dii}, 42, func(fi *fileInfo) bool { return true })
+	for _, fi := range result {
+		fp := path.Join(fi.dirname, fi.Name())
+		if fi.Name() != vm[fp]["name"].(string) ||
+			fi.dirname != vm[fp]["dirname"].(string) ||
+			fi.IsDir() != vm[fp]["isDir"].(bool) ||
+			fi.Size() != vm[fp]["size"].(int64) {
+			t.Fail()
+		}
+	}
+
+	// verify breadth first, order
+	level0 := result[:3]
+	for _, fi := range level0 {
+		if fi.dirname != p {
+			t.Fail()
+		}
+	}
+	result = searchFiles([]*fileInfo{dii}, 5, func(fi *fileInfo) bool { return true })
+	level0 = result[:3]
+	for _, fi := range level0 {
+		if fi.dirname != p {
+			t.Fail()
+		}
+	}
+	result = searchFiles([]*fileInfo{dii}, 2, func(fi *fileInfo) bool { return true })
+	for _, fi := range result {
+		if fi.dirname != p {
+			t.Fail()
+		}
+	}
+
+	// not finding when no rights for dir
+	err = os.Chmod(p0, 0)
+	errFatal(t, err)
+	defer func() {
+		err = os.Chmod(p0, os.ModePerm)
+		errFatal(t, err)
+	}()
+	if len(searchFiles([]*fileInfo{dii}, 42, func(fi *fileInfo) bool { return true })) != 3 {
+		t.Fail()
+	}
+}
+
+func TestFileSearch(t *testing.T) {
+	var queryString url.Values
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileSearch(w, r, queryString)
+	}
+
+	p := path.Join(testdir, "search")
+	err := removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+
+	checkError := func(err int) {
+		htreq(t, "SEARCH", s.URL+p, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != err {
+				t.Fail()
+			}
+		})
+	}
+	checkBadReq := func() { checkError(http.StatusBadRequest) }
+
+	// max results set
+	for i := 0; i < 42; i++ {
+		pi := path.Join(p, fmt.Sprintf("file%d", i))
+		err := withNewFile(pi, nil)
+		errFatal(t, err)
+	}
+	checkLen := func(l int) {
+		htreq(t, "SEARCH", s.URL+p, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			js, err := ioutil.ReadAll(rsp.Body)
+			errFatal(t, err)
+			var m []map[string]interface{}
+			err = json.Unmarshal(js, &m)
+			errFatal(t, err)
+			if len(m) != l {
+				t.Fail()
+			}
+		})
+	}
+	queryString = make(url.Values)
+	checkLen(defaultMaxSearchResults)
+	queryString.Set("max", "42")
+	checkLen(defaultMaxSearchResults)
+	queryString.Set("max", "3")
+	checkLen(3)
+
+	// only one name
+	queryString = make(url.Values)
+	queryString.Add("name", "some")
+	queryString.Add("name", "someOther")
+	checkBadReq()
+
+	// only one content
+	queryString = make(url.Values)
+	queryString.Add("content", "some")
+	queryString.Add("content", "someOther")
+	checkBadReq()
+
+	// invalid regexp
+	queryString = make(url.Values)
+	queryString.Set("name", "(")
+	checkBadReq()
+
+	// not found
+	queryString = make(url.Values)
+	err = os.RemoveAll(p)
+	errFatal(t, err)
+	checkError(http.StatusNotFound)
+
+	// no permissions
+	err = ensureDir(p)
+	errFatal(t, err)
+	err = os.Chmod(p, 0)
+	errFatal(t, err)
+	defer func() {
+		err = os.Chmod(p, os.ModePerm)
+		errFatal(t, err)
+	}()
+	checkLen(0)
+
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "fileA"), func(f *os.File) error {
+		_, err := f.Write([]byte("a"))
+		return err
+	})
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "fileB"), func(f *os.File) error {
+		_, err := f.Write([]byte("b"))
+		return err
+	})
+	errFatal(t, err)
+	err = ensureDir(path.Join(p, "dirA"))
+	errFatal(t, err)
+
+	// filtering by name
+	queryString = make(url.Values)
+	queryString.Set("name", "A")
+	checkLen(2)
+
+	// filtering by content
+	queryString = make(url.Values)
+	queryString.Set("content", "b")
+	checkLen(1)
+
+	// filtering by name and content
+	queryString = make(url.Values)
+	queryString.Set("name", "A")
+	queryString.Set("content", "a")
+	checkLen(1)
+	queryString = make(url.Values)
+	queryString.Set("name", "A")
+	queryString.Set("content", "b")
+	checkLen(0)
+
+	// filtering by content, no rights
+	err = os.Chmod(path.Join(p, "fileA"), 0)
+	errFatal(t, err)
+	defer func() {
+		err = os.Chmod(path.Join(p, "fileA"), os.ModePerm)
+		errFatal(t, err)
+	}()
+	queryString = make(url.Values)
+	queryString.Set("content", "a")
+	checkLen(0)
+
+	// check data
+	fia, err := os.Lstat(path.Join(p, "fileA"))
+	errFatal(t, err)
+	fib, err := os.Lstat(path.Join(p, "fileB"))
+	errFatal(t, err)
+	fid, err := os.Lstat(path.Join(p, "dirA"))
+	errFatal(t, err)
+	mts := make(map[string]int64)
+	mts["fileA"] = fia.ModTime().Unix()
+	mts["fileB"] = fib.ModTime().Unix()
+	mts["dirA"] = fid.ModTime().Unix()
+	sizeOfADir := fid.Size()
+	queryString = make(url.Values)
+	htreq(t, "SEARCH", s.URL+p, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		js, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		var m []map[string]interface{}
+		err = json.Unmarshal(js, &m)
+		errFatal(t, err)
+		if len(m) != 3 {
+			t.Fail()
+		}
+		for _, pr := range m {
+			convert64(pr, "size")
+			convert64(pr, "modTime")
+			n, ok := pr["name"].(string)
+			if !ok {
+				t.Fail()
+			}
+			if !compareProperties(pr, map[string]interface{}{
+				"dirname": p,
+				"name":    n,
+				"isDir":   n == "dirA",
+				"size": func() int64 {
+					if n == "dirA" {
+						return sizeOfADir
+					} else {
+						return int64(1)
+					}
+				}(),
+				"modTime": mts[n]}) {
+				t.Fail()
+			}
+		}
+	})
 }
 
 func TestFileProps(t *testing.T) {
@@ -711,70 +1164,6 @@ func TestFileProps(t *testing.T) {
 		js, err := ioutil.ReadAll(rsp.Body)
 		errFatal(t, err)
 		if len(js) != 0 {
-			t.Fail()
-		}
-	})
-}
-
-func TestChmod(t *testing.T) {
-	rc := httptest.NewRecorder()
-	var v interface{}
-	fn := "some-file"
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
-	p := path.Join(dn, fn)
-	fi, err := os.Stat(p)
-	errFatal(t, err)
-	thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
-		chmod(w, p, fi, v)
-	}
-
-	if chmod(rc, "", nil, "not float") {
-		t.Fail()
-	}
-
-	err = removeIfExists(p)
-	errFatal(t, err)
-	if chmod(rc, p, fi, float64(os.ModePerm)) {
-		t.Fail()
-	}
-
-	err = withNewFile(p, nil)
-	errFatal(t, err)
-	fi, err = os.Stat(p)
-	errFatal(t, err)
-	if !chmod(rc, p, fi, float64(fi.Mode()^os.FileMode(0111))) {
-		t.Fail()
-	}
-
-	v = "not float"
-	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusBadRequest {
-			t.Fail()
-		}
-	})
-
-	err = withNewFile(p, nil)
-	errFatal(t, err)
-	fi, err = os.Stat(p)
-	errFatal(t, err)
-	err = removeIfExists(p)
-	errFatal(t, err)
-	v = float64(fi.Mode() ^ os.FileMode(0111))
-	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
-
-	err = withNewFile(p, nil)
-	errFatal(t, err)
-	fi, err = os.Stat(p)
-	errFatal(t, err)
-	v = float64(fi.Mode() ^ os.FileMode(0111))
-	htreq(t, "MODPROPS", s.URL, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
@@ -1234,7 +1623,7 @@ func TestGetFile(t *testing.T) {
 	err := ensureDir(dn)
 	errFatal(t, err)
 	var (
-		f *os.File
+		f  *os.File
 		fi os.FileInfo
 	)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
@@ -1355,62 +1744,68 @@ func TestOptions(t *testing.T) {
 	})
 }
 
-func TestNotSupported(t *testing.T) {
-	thnd.sh = handler
-	test := func(method string) {
-		htreq(t, method, s.URL, nil, func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusMethodNotAllowed {
-				t.Fail()
-			}
-		})
-	}
-	test("TRACE")
-	test("CONNECT")
-	test("TINAM")
-}
-
-func TestProps(t *testing.T) {
+func TestGet(t *testing.T) {
 	thnd.sh = handler
 	dn = path.Join(testdir, "http")
 	err := ensureDir(dn)
 	errFatal(t, err)
-	fn := "some-file"
-	p := path.Join(dn, fn)
-	err = withNewFile(p, nil)
-	if err != nil {
-		t.Fatal()
-	}
-	htreq(t, "PROPS", s.URL+"/"+fn, nil, func(rsp *http.Response) {
+
+	// cmd can be props only
+	htreq(t, "GET", s.URL+"?cmd=notprops", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+	htreq(t, "GET", s.URL+"?cmd=props", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
-	htreq(t, "PROPS", s.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusBadRequest {
+
+	// not found
+	fn := "some-file"
+	p := path.Join(dn, fn)
+	url := s.URL + "/" + fn
+	err = removeIfExists(p)
+	errFatal(t, err)
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
 	})
-}
 
-func TestModprops(t *testing.T) {
-	thnd.sh = handler
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
+	// listing if directory
+	err = os.RemoveAll(dn)
 	errFatal(t, err)
-	fn := "some-file"
-	p := path.Join(dn, fn)
-	err = withNewFile(p, nil)
-	if err != nil {
-		t.Fatal()
-	}
-	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusOK {
-				t.Fail()
-			}
-		})
-	htreq(t, "MODPROPS", s.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusBadRequest {
+	err = ensureDir(dn)
+	errFatal(t, err)
+	c := []byte("some-content")
+	err = withNewFile(p, func(f *os.File) error {
+		_, err = f.Write(c)
+		return err
+	})
+	errFatal(t, err)
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		var d []map[string]interface{}
+		err = json.Unmarshal(b, &d)
+		if err != nil || len(d) != 1 || d[0]["name"] != fn {
+			t.Fail()
+		}
+	})
+
+	// file otherwise
+	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		if !bytes.Equal(b, c) {
 			t.Fail()
 		}
 	})
@@ -1471,6 +1866,53 @@ func TestModprops(t *testing.T) {
 // 	header[http.CanonicalHeaderKey("Last-Modified")] = []string{fs.ModTime().UTC().Format(http.TimeFormat)}
 // 	testGet(hello, http.StatusOK, header, t)
 // }
+
+func TestProps(t *testing.T) {
+	thnd.sh = handler
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+	fn := "some-file"
+	p := path.Join(dn, fn)
+	err = withNewFile(p, nil)
+	if err != nil {
+		t.Fatal()
+	}
+	htreq(t, "PROPS", s.URL+"/"+fn, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+	htreq(t, "PROPS", s.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+}
+
+func TestModprops(t *testing.T) {
+	thnd.sh = handler
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+	fn := "some-file"
+	p := path.Join(dn, fn)
+	err = withNewFile(p, nil)
+	if err != nil {
+		t.Fatal()
+	}
+	htreq(t, "MODPROPS", s.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+		})
+	htreq(t, "MODPROPS", s.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+}
 
 // func TestPut(t *testing.T) {
 // 	// until custom rights checking, skip these tests, if root
@@ -1621,6 +2063,20 @@ func TestModprops(t *testing.T) {
 // 		t.Fail()
 // 	}
 // }
+
+func TestNotSupported(t *testing.T) {
+	thnd.sh = handler
+	test := func(method string) {
+		htreq(t, method, s.URL, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusMethodNotAllowed {
+				t.Fail()
+			}
+		})
+	}
+	test("TRACE")
+	test("CONNECT")
+	test("TINAM")
+}
 
 // func TestMultipleRequests(t *testing.T) {
 // 	// until custom rights checking, skip these tests, if root
