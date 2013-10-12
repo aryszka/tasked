@@ -378,6 +378,61 @@ func TestErrorResponse(t *testing.T) {
 	testStatus(http.StatusRequestEntityTooLarge)
 }
 
+func TestHandleErrno(t *testing.T) {
+	var errno syscall.Errno
+	thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
+		handleErrno(w, errno)
+	}
+
+	// enoent
+	errno = syscall.ENOENT
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	// EPERM
+	errno = syscall.EPERM
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	// EACCES
+	errno = syscall.EACCES
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	// EISDIR
+	errno = syscall.EISDIR
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	// EINVAL
+	errno = syscall.EINVAL
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// other
+	errno = syscall.EIO
+	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusInternalServerError {
+			t.Fail()
+		}
+	})
+}
+
 func TestCheckOsError(t *testing.T) {
 	test := func(testErr error, status int, clb func(rsp *http.Response)) {
 		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
@@ -406,7 +461,7 @@ func TestCheckOsError(t *testing.T) {
 	test(os.ErrPermission, http.StatusNotFound, nil)
 
 	// 400
-	perr := &os.PathError{Err: os.ErrInvalid}
+	perr := &os.PathError{Err: syscall.EINVAL}
 	if checkOsError(httptest.NewRecorder(), perr) {
 		t.Fail()
 	}
@@ -1734,11 +1789,185 @@ func TestGetFile(t *testing.T) {
 	errFatal(t, err)
 }
 
+func TestFilePut(t *testing.T) {
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		filePut(w, r)
+	}
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	errFatal(t, err)
+
+	// invalid path
+	htreq(t, "PUT", s.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// existing dir
+	err = os.MkdirAll(path.Join(dn, "dir"), os.ModePerm)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/dir", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	// no permission to write dir
+	dp := path.Join(dn, "dir")
+	err = ensureDir(dp)
+	errFatal(t, err)
+	p := path.Join(dp, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = os.Chmod(dp, 0555)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/dir/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dp, 0777)
+
+	// no permission to execute dir
+	dp = path.Join(dn, "dir")
+	err = ensureDir(dp)
+	errFatal(t, err)
+	p = path.Join(dp, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = os.Chmod(dp, 0666)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/dir/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dp, 0777)
+
+	// no permission to write file
+	p = path.Join(dn, "file")
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	err = os.Chmod(p, 0444)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	// existing file
+	p = path.Join(dn, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = withNewFile(p, func(f *os.File) error {
+		_, err := f.Write([]byte("old content"))
+		return err
+	})
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/file", bytes.NewBufferString("new content"), func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		f, err := os.Open(p)
+		errFatal(t, err)
+		defer f.Close()
+		content, err := ioutil.ReadAll(f)
+		errFatal(t, err)
+		if !bytes.Equal(content, []byte("new content")) {
+			t.Fail()
+		}
+	})
+
+	// new file
+	p = path.Join(dn, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/file", bytes.NewBufferString("some content"), func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		f, err := os.Open(p)
+		errFatal(t, err)
+		defer f.Close()
+		content, err := ioutil.ReadAll(f)
+		errFatal(t, err)
+		if !bytes.Equal(content, []byte("some content")) {
+			t.Fail()
+		}
+	})
+
+	// clear file
+	p = path.Join(dn, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = withNewFile(p, func(f *os.File) error {
+		_, err := f.Write([]byte("old content"))
+		return err
+	})
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		f, err := os.Open(p)
+		errFatal(t, err)
+		defer f.Close()
+		content, err := ioutil.ReadAll(f)
+		errFatal(t, err)
+		if len(content) != 0 {
+			t.Fail()
+		}
+	})
+
+	// create full path
+	d0 := path.Join(dn, "dir0")
+	err = removeIfExists(d0)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/dir0/dir1/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		_, err := os.Lstat(path.Join(dn, "dir0/dir1/file"))
+		if err != nil {
+			t.Fail()
+		}
+	})
+}
+
 func TestOptions(t *testing.T) {
 	thnd.sh = handler
 	htreq(t, "OPTIONS", s.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
 			!verifyHeader(map[string][]string{"Content-Length": []string{"0"}}, rsp.Header) {
+			t.Fail()
+		}
+	})
+}
+
+func TestSearch(t *testing.T) {
+	thnd.sh = handler
+	htreq(t, "SEARCH", s.URL+"?cmd=search", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+	dn = testdir
+	for i := 0; i < 3; i++ {
+		err := withNewFile(path.Join(dn, fmt.Sprintf("file%d", i)), nil)
+		errFatal(t, err)
+	}
+	htreq(t, "SEARCH", s.URL+"?max=3", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		js, err := ioutil.ReadAll(rsp.Body)
+		errFatal(t, err)
+		var m []map[string]interface{}
+		err = json.Unmarshal(js, &m)
+		errFatal(t, err)
+		if len(m) != 3 {
 			t.Fail()
 		}
 	})
@@ -1750,9 +1979,19 @@ func TestGet(t *testing.T) {
 	err := ensureDir(dn)
 	errFatal(t, err)
 
-	// cmd can be props only
-	htreq(t, "GET", s.URL+"?cmd=notprops", nil, func(rsp *http.Response) {
+	// cmd can be props or search only
+	htreq(t, "GET", s.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+	htreq(t, "GET", s.URL+"?cmd=search&cmd=props", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+	htreq(t, "GET", s.URL+"?cmd=search", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
@@ -1811,62 +2050,6 @@ func TestGet(t *testing.T) {
 	})
 }
 
-// func TestGet(t *testing.T) {
-// 	// until custom rights checking, skip these tests, if root
-// 	if isRoot {
-// 		t.Skip()
-// 	}
-//
-// 	// not found
-// 	err := os.Remove(fn)
-// 	if err != nil && !os.IsNotExist(err) {
-// 		t.Fatal()
-// 	}
-// 	testStatusCode(http.StatusNotFound, http.HandlerFunc(handler), getFunc, t)
-//
-// 	// no perm
-// 	err = withNewFile(fn, nil)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<8)))
-// 	defer os.Chmod(fn, os.ModePerm)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	testStatusCode(http.StatusUnauthorized, http.HandlerFunc(handler), getFunc, t)
-//
-// 	// empty
-// 	err = withNewFile(fn, nil)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fs, err := os.Stat(fn)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	header := make(map[string][]string)
-// 	header[http.CanonicalHeaderKey("Last-Modified")] = []string{fs.ModTime().UTC().Format(http.TimeFormat)}
-// 	testGet(nil, http.StatusOK, header, t)
-//
-// 	// has content
-// 	hello := []byte("hello")
-// 	err = withNewFile(fn, func(f *os.File) error {
-// 		_, err := f.Write(hello)
-// 		return err
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	fs, err = os.Stat(fn)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	header = make(map[string][]string)
-// 	header[http.CanonicalHeaderKey("Last-Modified")] = []string{fs.ModTime().UTC().Format(http.TimeFormat)}
-// 	testGet(hello, http.StatusOK, header, t)
-// }
-
 func TestProps(t *testing.T) {
 	thnd.sh = handler
 	dn = path.Join(testdir, "http")
@@ -1914,96 +2097,31 @@ func TestModprops(t *testing.T) {
 	})
 }
 
-// func TestPut(t *testing.T) {
-// 	// until custom rights checking, skip these tests, if root
-// 	if isRoot {
-// 		t.Skip()
-// 	}
-//
-// 	hello := []byte("hello")
-//
-// 	// exists no permission to write
-// 	err := withNewFile(fn, nil)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	func() {
-// 		err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<7)))
-// 		if err != nil {
-// 			t.Fatal()
-// 		}
-// 		defer os.Chmod(fn, os.ModePerm)
-// 		testPut(hello, []byte(http.StatusText(http.StatusUnauthorized)), http.StatusUnauthorized, t)
-// 		ok, err := checkFile(nil)
-// 		if err != nil {
-// 			t.Fatal()
-// 		}
-// 		if !ok {
-// 			t.Fail()
-// 		}
-// 	}()
-//
-// 	// doesn't exist
-// 	err = os.Remove(fn)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	testPut(hello, nil, http.StatusOK, t)
-// 	ok, err := checkFile(hello)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	if !ok {
-// 		t.Fail()
-// 	}
-//
-// 	// exists, empty
-// 	err = withNewFile(fn, nil)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	testPut(hello, nil, http.StatusOK, t)
-// 	ok, err = checkFile(hello)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	if !ok {
-// 		t.Fail()
-// 	}
-//
-// 	// exists, not empty
-// 	err = withNewFile(fn, func(f *os.File) error {
-// 		_, err := f.Write([]byte("olleh"))
-// 		return err
-// 	})
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	testPut(hello, nil, http.StatusOK, t)
-// 	ok, err = checkFile(hello)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	if !ok {
-// 		t.Fail()
-// 	}
-//
-// 	// POST
-// 	testReq(nil, http.StatusOK, nil, func(c *http.Client, url string) (*http.Response, error) {
-// 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(hello))
-// 		if err != nil {
-// 			return nil, err
-// 		}
-// 		return c.Do(req)
-// 	}, t)
-// 	ok, err = checkFile(hello)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	if !ok {
-// 		t.Fail()
-// 	}
-// }
+func TestPut(t *testing.T) {
+	thnd.sh = handler
+	dn = path.Join(testdir, "http")
+
+	// invalid command
+	htreq(t, "PUT", s.URL+"?cmd=some", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// put
+	p := path.Join(dn, "some-file")
+	err := removeIfExists(p)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/some-file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		_, err := os.Lstat(p)
+		if err != nil {
+			t.Fail()
+		}
+	})
+}
 
 // func TestDelete(t *testing.T) {
 // 	// until custom rights checking, skip these tests, if root

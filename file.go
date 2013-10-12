@@ -105,9 +105,6 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 
 func getValues(vs map[string][]string, key string, allowed ...string) ([]string, bool) {
 	v := vs[key]
-	if len(v) == 0 {
-		return nil, true
-	}
 	for _, vi := range v {
 		found := false
 		for _, ac := range allowed {
@@ -129,6 +126,17 @@ func errorResponse(w http.ResponseWriter, s int) {
 	http.Error(w, http.StatusText(s), s)
 }
 
+func handleErrno(w http.ResponseWriter, errno syscall.Errno) {
+	switch errno {
+	case syscall.ENOENT, syscall.EPERM, syscall.EACCES, syscall.EISDIR:
+		errorResponse(w, http.StatusNotFound)
+	case syscall.EINVAL:
+		errorResponse(w, http.StatusBadRequest)
+	default:
+		errorResponse(w, http.StatusInternalServerError)
+	}
+}
+
 // Writes an error response according to the given error.
 // If the error is permission related, it uses 404 Not Found,
 // but the response header will contain: 'Www-Authenticate: tasked.'
@@ -141,16 +149,19 @@ func checkOsError(w http.ResponseWriter, err error) bool {
 	case os.IsNotExist(err), os.IsPermission(err):
 		errorResponse(w, http.StatusNotFound)
 	default:
-		if perr, ok := err.(*os.PathError); ok && perr.Err.Error() == os.ErrInvalid.Error() {
-			errorResponse(w, http.StatusBadRequest)
-		} else if serr, ok := err.(*os.SyscallError); ok {
-			if nerr, ok := serr.Err.(syscall.Errno); ok &&
-				(nerr == syscall.ENOENT || nerr == syscall.EPERM || nerr == syscall.EACCES) {
-				errorResponse(w, http.StatusNotFound)
+		if perr, ok := err.(*os.PathError); ok {
+			if errno, ok := perr.Err.(syscall.Errno); ok {
+				handleErrno(w, errno)
+				return false
 			}
-		} else {
-			errorResponse(w, http.StatusInternalServerError)
 		}
+		if serr, ok := err.(*os.SyscallError); ok {
+			if errno, ok := serr.Err.(syscall.Errno); ok {
+				handleErrno(w, errno)
+				return false
+			}
+		}
+		errorResponse(w, http.StatusInternalServerError)
 	}
 	return false
 }
@@ -460,6 +471,21 @@ func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo)
 	io.Copy(w, f)
 }
 
+func filePut(w http.ResponseWriter, r *http.Request) {
+	p := path.Join(dn, r.URL.Path)
+	err := os.MkdirAll(path.Dir(p), os.ModePerm)
+	if !checkOsError(w, err) {
+		return
+	}
+	f, err := os.Create(p)
+	if !checkOsError(w, err) {
+		return
+	}
+	defer doretlog42(f.Close)
+	_, err = io.Copy(f, r.Body)
+	checkOsError(w, err)
+}
+
 func options(w http.ResponseWriter, r *http.Request) {
 	// no-op
 }
@@ -531,13 +557,7 @@ func put(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, err := os.Create(path.Join(dn, r.URL.Path))
-	if checkOsError(w, err) {
-		return
-	}
-	defer doretlog42(f.Close)
-	_, err = io.Copy(f, r.Body)
-	checkOsError(w, err)
+	filePut(w, r)
 }
 
 func post(w http.ResponseWriter, r *http.Request) {
