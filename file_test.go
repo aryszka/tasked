@@ -800,8 +800,8 @@ func TestSearchFiles(t *testing.T) {
 	err = ensureDir(p)
 	errFatal(t, err)
 	di, err = os.Lstat(p)
-	dii = &fileInfo{sys: di, dirname: testdir}
 	errFatal(t, err)
+	dii = &fileInfo{sys: di, dirname: testdir}
 	err = withNewFile(path.Join(p, "file0"), nil)
 	errFatal(t, err)
 	err = withNewFile(path.Join(p, "file1"), nil)
@@ -966,6 +966,28 @@ func TestSearchFiles(t *testing.T) {
 			t.Fail()
 		}
 	}
+}
+
+func TestSearchFilesNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	p := path.Join(testdir, "search")
+	err := removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+	p0 := path.Join(p, "dir0")
+	err = ensureDir(p0)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "file0"), nil)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "file1"), nil)
+	errFatal(t, err)
+	di, err := os.Lstat(p)
+	errFatal(t, err)
+	dii := &fileInfo{sys: di, dirname: testdir}
 
 	// not finding when no rights for dir
 	err = os.Chmod(p0, 0)
@@ -1008,20 +1030,6 @@ func TestCopyTree(t *testing.T) {
 		t.Fail()
 	}
 
-	// no access
-	err = ensureDir(dir0)
-	errFatal(t, err)
-	err = removeIfExists(dir1)
-	errFatal(t, err)
-	err = os.Chmod(dir, 0600)
-	errFatal(t, err)
-	err = copyTree(dir0, dir1)
-	if !isPermission(err) {
-		t.Fail()
-	}
-	err = os.Chmod(dir, os.ModePerm)
-	errFatal(t, err)
-
 	// tree
 	err = ensureDir(dir0)
 	errFatal(t, err)
@@ -1039,9 +1047,60 @@ func TestCopyTree(t *testing.T) {
 		t.Fail()
 	}
 
+	// copy file
+	f0, f1 := path.Join(dir, "file0"), path.Join(dir, "file1")
+	err = withNewFile(f0, func(f *os.File) error {
+		_, err := f.Write([]byte("some content"))
+		return err
+	})
+	errFatal(t, err)
+	err = removeIfExists(f1)
+	errFatal(t, err)
+	err = copyTree(f0, f1)
+	if err != nil {
+		t.Fail()
+	}
+	cf, err := os.Open(f1)
+	errFatal(t, err)
+	defer cf.Close()
+	ccf, err := ioutil.ReadAll(cf)
+	errFatal(t, err)
+	if !bytes.Equal(ccf, []byte("some content")) {
+		t.Fail()
+	}
+}
+
+func TestCopyTreeNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	dir := path.Join(dn, "copy")
+	err := removeIfExists(dir)
+	errFatal(t, err)
+	err = ensureDir(dir)
+	errFatal(t, err)
+
+	// no access
+	dir0 := path.Join(dir, "dir0")
+	err = ensureDir(dir0)
+	errFatal(t, err)
+	dir1 := path.Join(dir, "dir1")
+	err = removeIfExists(dir1)
+	errFatal(t, err)
+	err = os.Chmod(dir, 0600)
+	errFatal(t, err)
+	err = copyTree(dir0, dir1)
+	if !isPermission(err) {
+		t.Fail()
+	}
+	err = os.Chmod(dir, os.ModePerm)
+	errFatal(t, err)
+
 	// copy abort
 	err = ensureDir(dir0)
 	errFatal(t, err)
+	fp := path.Join(dir0, "some")
 	err = withNewFile(fp, nil)
 	errFatal(t, err)
 	err = os.Chmod(fp, 0000)
@@ -1076,16 +1135,6 @@ func TestCopyTree(t *testing.T) {
 	}
 	err = os.Chmod(dir, 0777)
 	errFatal(t, err)
-
-	// copy file
-	err = withNewFile(f0, nil)
-	errFatal(t, err)
-	err = removeIfExists(f1)
-	errFatal(t, err)
-	err = copyTree(f0, f1)
-	if err != nil {
-		t.Fail()
-	}
 
 	// preserve mode
 	err = withNewFile(f0, nil)
@@ -1176,17 +1225,6 @@ func TestFileSearch(t *testing.T) {
 	errFatal(t, err)
 	checkError(http.StatusNotFound)
 
-	// no permissions
-	err = ensureDir(p)
-	errFatal(t, err)
-	err = os.Chmod(p, 0)
-	errFatal(t, err)
-	defer func() {
-		err = os.Chmod(p, os.ModePerm)
-		errFatal(t, err)
-	}()
-	checkLen(0)
-
 	err = removeIfExists(p)
 	errFatal(t, err)
 	err = ensureDir(p)
@@ -1222,17 +1260,6 @@ func TestFileSearch(t *testing.T) {
 	queryString = make(url.Values)
 	queryString.Set("name", "A")
 	queryString.Set("content", "b")
-	checkLen(0)
-
-	// filtering by content, no rights
-	err = os.Chmod(path.Join(p, "fileA"), 0)
-	errFatal(t, err)
-	defer func() {
-		err = os.Chmod(path.Join(p, "fileA"), os.ModePerm)
-		errFatal(t, err)
-	}()
-	queryString = make(url.Values)
-	queryString.Set("content", "a")
 	checkLen(0)
 
 	// check data
@@ -1283,6 +1310,69 @@ func TestFileSearch(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFileSearchNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	var queryString url.Values
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileSearch(w, r, queryString)
+	}
+
+	p := path.Join(dn, "search")
+	err := removeIfExists(p)
+	errFatal(t, err)
+	err = ensureDir(p)
+	errFatal(t, err)
+
+	checkLen := func(l int) {
+		htreq(t, "SEARCH", s.URL+"/search", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			js, err := ioutil.ReadAll(rsp.Body)
+			errFatal(t, err)
+			var m []map[string]interface{}
+			err = json.Unmarshal(js, &m)
+			errFatal(t, err)
+			if len(m) != l {
+				t.Fail()
+			}
+		})
+	}
+
+	// no permissions
+	err = ensureDir(p)
+	errFatal(t, err)
+	err = os.Chmod(p, 0)
+	errFatal(t, err)
+	defer func() {
+		err = os.Chmod(p, os.ModePerm)
+		errFatal(t, err)
+	}()
+	checkLen(0)
+
+	// filtering by content, no rights
+	err = os.Chmod(p, 0777)
+	errFatal(t, err)
+	err = withNewFile(path.Join(p, "fileA"), func(f *os.File) error {
+		_, err := f.Write([]byte("a"))
+		return err
+	})
+	t.Log("here")
+	errFatal(t, err)
+	err = os.Chmod(path.Join(p, "fileA"), 0)
+	errFatal(t, err)
+	defer func() {
+		err = os.Chmod(path.Join(p, "fileA"), os.ModePerm)
+		errFatal(t, err)
+	}()
+	queryString = make(url.Values)
+	queryString.Set("content", "a")
+	checkLen(0)
 }
 
 func TestFileProps(t *testing.T) {
@@ -1371,10 +1461,14 @@ func TestFilePropsRoot(t *testing.T) {
 	mx.Lock()
 	defer mx.Unlock()
 
+	err := os.Chmod(testdir, 0777)
+	errFatal(t, err)
+	err = os.Chmod(dn, 0777)
+	errFatal(t, err)
 	fn := "some-file-uid"
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
-	err := withNewFile(p, nil)
+	err = withNewFile(p, nil)
 	errFatal(t, err)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileProps(w, r)
@@ -1717,8 +1811,17 @@ func TestGetDirRoot(t *testing.T) {
 	mx.Lock()
 	defer mx.Unlock()
 
+	err := os.Chmod(testdir, 0777)
+	errFatal(t, err)
+	err = os.Chmod(dn, 0777)
+	errFatal(t, err)
+
 	fn := "some-dir"
 	p := path.Join(dn, fn)
+	err = ensureDir(p)
+	errFatal(t, err)
+	err = os.Chmod(p, 0777)
+	errFatal(t, err)
 	url := s.URL + "/" + fn
 	var d *os.File
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
@@ -1758,7 +1861,9 @@ func TestGetDirRoot(t *testing.T) {
 	// }()
 
 	d, err = os.Open(p)
+	t.Log("here good")
 	errFatal(t, err)
+	t.Log("here not anymore")
 	htreq(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
@@ -1929,52 +2034,8 @@ func TestFilePut(t *testing.T) {
 		}
 	})
 
-	// no permission to write dir
-	dp := path.Join(dn, "dir")
-	err = ensureDir(dp)
-	errFatal(t, err)
-	p := path.Join(dp, "file")
-	err = removeIfExists(p)
-	errFatal(t, err)
-	err = os.Chmod(dp, 0555)
-	errFatal(t, err)
-	htreq(t, "PUT", s.URL+"/dir/file", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
-	err = os.Chmod(dp, 0777)
-
-	// no permission to execute dir
-	dp = path.Join(dn, "dir")
-	err = ensureDir(dp)
-	errFatal(t, err)
-	p = path.Join(dp, "file")
-	err = removeIfExists(p)
-	errFatal(t, err)
-	err = os.Chmod(dp, 0666)
-	errFatal(t, err)
-	htreq(t, "PUT", s.URL+"/dir/file", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
-	err = os.Chmod(dp, 0777)
-
-	// no permission to write file
-	p = path.Join(dn, "file")
-	err = withNewFile(p, nil)
-	errFatal(t, err)
-	err = os.Chmod(p, 0444)
-	errFatal(t, err)
-	htreq(t, "PUT", s.URL+"/file", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
-
 	// existing file
-	p = path.Join(dn, "file")
+	p := path.Join(dn, "file")
 	err = removeIfExists(p)
 	errFatal(t, err)
 	err = withNewFile(p, func(f *os.File) error {
@@ -2057,11 +2118,68 @@ func TestFilePut(t *testing.T) {
 	})
 }
 
-func TestFileCoppy(t *testing.T) {
+func TestFilePutNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		filePut(w, r)
+	}
+
+	// no permission to write dir
+	dp := path.Join(dn, "dir")
+	err := ensureDir(dp)
+	errFatal(t, err)
+	p := path.Join(dp, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = os.Chmod(dp, 0555)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/dir/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dp, 0777)
+
+	// no permission to execute dir
+	dp = path.Join(dn, "dir")
+	err = ensureDir(dp)
+	errFatal(t, err)
+	p = path.Join(dp, "file")
+	err = removeIfExists(p)
+	errFatal(t, err)
+	err = os.Chmod(dp, 0666)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/dir/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dp, 0777)
+
+	// no permission to write file
+	p = path.Join(dn, "file")
+	err = withNewFile(p, nil)
+	errFatal(t, err)
+	err = os.Chmod(p, 0444)
+	errFatal(t, err)
+	htreq(t, "PUT", s.URL+"/file", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+}
+
+func TestFileCopy(t *testing.T) {
 	var qry url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileCopy(w, r, qry)
 	}
+
+	p := path.Join(dn, "copy")
+	err := ensureDir(p)
 
 	// no to
 	qry = make(url.Values)
@@ -2099,28 +2217,8 @@ func TestFileCoppy(t *testing.T) {
 		}
 	})
 
-	// no permission
-	p := path.Join(dn, "copy")
-	err := ensureDir(p)
-	errFatal(t, err)
-	p0, p1 := path.Join(p, "dir0"), path.Join(p, "dir1")
-	err = ensureDir(p0)
-	errFatal(t, err)
-	err = ensureDir(p1)
-	errFatal(t, err)
-	err = os.Chmod(p, 0000)
-	errFatal(t, err)
-	qry = make(url.Values)
-	qry.Add("to", "/copy/dir1")
-	htreq(t, "COPY", s.URL+"/copy/dir0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
-	err = os.Chmod(p, 0777)
-	errFatal(t, err)
-
 	// copy to not existing
+	p0, p1 := path.Join(p, "dir0"), path.Join(p, "dir1")
 	err = ensureDir(p0)
 	errFatal(t, err)
 	err = removeIfExists(p1)
@@ -2145,6 +2243,38 @@ func TestFileCoppy(t *testing.T) {
 			t.Fail()
 		}
 	})
+}
+
+func TestFileCopyNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	var qry url.Values
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileCopy(w, r, qry)
+	}
+
+	// no permission
+	p := path.Join(dn, "copy")
+	err := ensureDir(p)
+	errFatal(t, err)
+	p0, p1 := path.Join(p, "dir0"), path.Join(p, "dir1")
+	err = ensureDir(p0)
+	errFatal(t, err)
+	err = ensureDir(p1)
+	errFatal(t, err)
+	err = os.Chmod(p, 0000)
+	errFatal(t, err)
+	qry = make(url.Values)
+	qry.Add("to", "/copy/dir1")
+	htreq(t, "COPY", s.URL+"/copy/dir0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(p, 0777)
+	errFatal(t, err)
 }
 
 func TestOptions(t *testing.T) {
