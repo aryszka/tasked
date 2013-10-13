@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -30,9 +31,7 @@ const (
 	searchQueryMax          = "max"
 	searchQueryName         = "name"
 	searchQueryContent      = "content"
-
-	// not for files, because of privacy
-	authTasked = "tasked" // www-authenticate value used on no permission
+	copyToKey               = "to"
 )
 
 type fileInfo struct {
@@ -80,6 +79,10 @@ var (
 		"txt16b": "text/plain; charset=utf-16be"}
 )
 
+func init() {
+	syscall.Umask(0077)
+}
+
 func replaceMode(n, m os.FileMode) os.FileMode {
 	return n&^modeMask | m&modeMask
 }
@@ -101,23 +104,6 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 		m["dirname"] = fii.dirname
 	}
 	return m
-}
-
-func getValues(vs map[string][]string, key string, allowed ...string) ([]string, bool) {
-	v := vs[key]
-	for _, vi := range v {
-		found := false
-		for _, ac := range allowed {
-			if vi == ac {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, false
-		}
-	}
-	return v, true
 }
 
 // Writes an error response with a specific status code
@@ -183,9 +169,18 @@ func checkServerError(w http.ResponseWriter, exp bool) bool {
 }
 
 func checkQryValuesCmd(w http.ResponseWriter, qry url.Values, allowed ...string) (string, bool) {
-	cmds, ok := getValues(qry, cmdKey, allowed...)
-	if !checkBadReq(w, ok) {
-		return "", false
+	cmds := qry[cmdKey]
+	for _, cmd := range cmds {
+		found := false
+		for _, ac := range allowed {
+			if cmd == ac {
+				found = true
+				break
+			}
+		}
+		if !checkBadReq(w, found) {
+			return "", false
+		}
 	}
 	if len(cmds) == 0 {
 		return "", true
@@ -197,11 +192,11 @@ func checkQryValuesCmd(w http.ResponseWriter, qry url.Values, allowed ...string)
 }
 
 func checkQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (string, bool) {
-	p, err := url.ParseQuery(r.URL.RawQuery)
+	qry, err := url.ParseQuery(r.URL.RawQuery)
 	if !checkBadReq(w, err == nil) {
 		return "", false
 	}
-	return checkQryValuesCmd(w, p, allowed...)
+	return checkQryValuesCmd(w, qry, allowed...)
 }
 
 func isOwner(u *user.User, fi os.FileInfo) (bool, error) {
@@ -271,6 +266,48 @@ func searchFiles(dirs []*fileInfo, max int, qry func(fi *fileInfo) bool) []*file
 		}
 	}
 	return append(res, searchFiles(dirs, max, qry)...)
+}
+
+func copyTree(from, to string) error {
+	if from == to {
+		return nil
+	}
+	fi, err := os.Lstat(from)
+	if err != nil {
+		return err
+	}
+	ff, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer doretlog42(ff.Close)
+	if fi.IsDir() {
+		err = os.MkdirAll(to, os.ModePerm)
+		if err != nil {
+			return err
+		}
+		fis, err := ff.Readdir(0)
+		if err != nil {
+			return err
+		}
+		for _, fii := range fis {
+			err = copyTree(path.Join(from, fii.Name()), path.Join(to, fii.Name()))
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		tf, err := os.Create(to)
+		if err != nil {
+			return err
+		}
+		defer doretlog42(tf.Close)
+		_, err = io.Copy(tf, ff)
+		if err != nil {
+			return err
+		}
+	}
+	return os.Chmod(to, fi.Mode())
 }
 
 func fileSearch(w http.ResponseWriter, r *http.Request, qry url.Values) {
@@ -482,7 +519,29 @@ func filePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer doretlog42(f.Close)
+	if !checkOsError(w, err) {
+		return
+	}
 	_, err = io.Copy(f, r.Body)
+	checkOsError(w, err)
+}
+
+func fileCopy(w http.ResponseWriter, r *http.Request, qry url.Values) {
+	tos, ok := qry[copyToKey]
+	if !checkBadReq(w, ok && len(tos) == 1) {
+		return
+	}
+	from := path.Join(dn, r.URL.Path)
+	to := path.Join(dn, tos[0])
+	if !checkBadReq(w, strings.Index(to, from) != 0 && strings.Index(from, to) != 0) {
+		return
+	}
+	err := os.RemoveAll(to)
+	if err != nil && !os.IsNotExist(err) {
+		checkOsError(w, err)
+		return
+	}
+	err = copyTree(from, to)
 	checkOsError(w, err)
 }
 
@@ -560,11 +619,15 @@ func put(w http.ResponseWriter, r *http.Request) {
 	filePut(w, r)
 }
 
-func post(w http.ResponseWriter, r *http.Request) {
-	// only modprops, copy, rename, delete, or if empty a put
-}
-
 func copy(w http.ResponseWriter, r *http.Request) {
+	qry, err := url.ParseQuery(r.URL.RawQuery)
+	if !checkBadReq(w, err == nil) {
+		return
+	}
+	if _, ok := checkQryValuesCmd(w, qry); !ok {
+		return
+	}
+	fileCopy(w, r, qry)
 }
 
 func rename(w http.ResponseWriter, r *http.Request) {
@@ -579,6 +642,11 @@ func delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func mkdir(w http.ResponseWriter, r *http.Request) {
+	// 0700
+}
+
+func post(w http.ResponseWriter, r *http.Request) {
+	// only modprops, copy, rename, delete, mkdir, or if empty a put
 }
 
 // Serves a directory for manipulating its content.

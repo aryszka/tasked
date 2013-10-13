@@ -57,6 +57,11 @@ var (
 )
 
 func init() {
+	dn = path.Join(testdir, "http")
+	err := ensureDir(dn)
+	if err != nil {
+		panic(err)
+	}
 	c, err := tls.X509KeyPair([]byte(defaultTlsCert), []byte(defaultTlsKey))
 	if err != nil {
 		panic(err)
@@ -267,6 +272,23 @@ func compareProperties(left, right map[string]interface{}) bool {
 	return true
 }
 
+func isPermission(err error) bool {
+	if err == nil {
+		return false
+	}
+	if perr, ok := err.(*os.PathError); ok {
+		if errno, ok := perr.Err.(syscall.Errno); ok && (errno == syscall.EPERM || errno == syscall.EACCES) {
+			return true
+		}
+	}
+	if serr, ok := err.(*os.SyscallError); ok {
+		if errno, ok := serr.Err.(syscall.Errno); ok && errno == syscall.EPERM {
+			return true
+		}
+	}
+	return false
+}
+
 func TestToPropertyMap(t *testing.T) {
 	var (
 		defaultTime time.Time
@@ -345,18 +367,6 @@ func TestToPropertyMap(t *testing.T) {
 }
 
 func TestGetValues(t *testing.T) {
-	v, ok := getValues(nil, "", "")
-	if len(v) != 0 || !ok {
-		t.Fail()
-	}
-	v, ok = getValues(map[string][]string{"k": []string{"v"}}, "k", "v")
-	if len(v) != 1 || v[0] != "v" || !ok {
-		t.Fail()
-	}
-	_, ok = getValues(map[string][]string{"k": []string{"v"}}, "k", "")
-	if ok {
-		t.Fail()
-	}
 }
 
 func TestErrorResponse(t *testing.T) {
@@ -550,15 +560,17 @@ func TestCheckServerError(t *testing.T) {
 	test(false)
 }
 
-func TestCheckQryCmd(t *testing.T) {
-	mkreq := func(u string) *http.Request {
-		return &http.Request{URL: &url.URL{RawQuery: u}}
+func TestChecValueskQryCmd(t *testing.T) {
+	mkqry := func(u string) url.Values {
+		vs, err := url.ParseQuery(u)
+		errFatal(t, err)
+		return vs
 	}
-	test := func(qry string, shouldFail bool, allowed ...string) {
-		thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-			checkQryCmd(w, r, allowed...)
+	test := func(qry url.Values, shouldFail bool, allowed ...string) {
+		thnd.sh = func(w http.ResponseWriter, _ *http.Request) {
+			checkQryValuesCmd(w, qry, allowed...)
 		}
-		htreq(t, "GET", s.URL+"/?"+qry, nil, func(rsp *http.Response) {
+		htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
 			if shouldFail && rsp.StatusCode != http.StatusBadRequest ||
 				!shouldFail && rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -566,35 +578,38 @@ func TestCheckQryCmd(t *testing.T) {
 		})
 	}
 
-	test("cmd=1", true)
-	test("cmd=1", false, "1")
-	test("cmd=1", false, "1", "2")
-	test("cmd=1&cmd=2", true, "1", "2")
-	test("cmd=1&cmd=1", true, "1", "2")
-	test("cmd=3", true, "1", "2")
+	test(mkqry("cmd=1"), true)
+	test(mkqry("cmd=1"), false, "1")
+	test(mkqry("cmd=1"), false, "1", "2")
+	test(mkqry("cmd=1&cmd=2"), true, "1", "2")
+	test(mkqry("cmd=1&cmd=1"), true, "1", "2")
+	test(mkqry("cmd=3"), true, "1", "2")
 
-	if _, ok := checkQryCmd(httptest.NewRecorder(), mkreq("%%")); ok {
+	if cmd, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("")); !ok || len(cmd) > 0 {
 		t.Fail()
 	}
-	if cmd, ok := checkQryCmd(httptest.NewRecorder(), mkreq("")); !ok || len(cmd) > 0 {
+	if _, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1")); ok {
 		t.Fail()
 	}
-	if _, ok := checkQryCmd(httptest.NewRecorder(), mkreq("cmd=1")); ok {
+	if cmd, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1"), "1"); !ok || cmd != "1" {
 		t.Fail()
 	}
-	if cmd, ok := checkQryCmd(httptest.NewRecorder(), mkreq("cmd=1"), "1"); !ok || cmd != "1" {
+	if cmd, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1"), "1", "2"); !ok || cmd != "1" {
 		t.Fail()
 	}
-	if cmd, ok := checkQryCmd(httptest.NewRecorder(), mkreq("cmd=1"), "1", "2"); !ok || cmd != "1" {
+	if _, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1&cmd=2"), "1", "2"); ok {
 		t.Fail()
 	}
-	if _, ok := checkQryCmd(httptest.NewRecorder(), mkreq("cmd=1&cmd=2"), "1", "2"); ok {
+	if _, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1&cmd=1"), "1", "2"); ok {
 		t.Fail()
 	}
-	if _, ok := checkQryCmd(httptest.NewRecorder(), mkreq("cmd=1&cmd=1"), "1", "2"); ok {
+	if _, ok := checkQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=3"), "1", "2"); ok {
 		t.Fail()
 	}
-	if _, ok := checkQryCmd(httptest.NewRecorder(), mkreq("cmd=3"), "1", "2"); ok {
+}
+
+func TestCheckQryCmd(t *testing.T) {
+	if _, ok := checkQryCmd(httptest.NewRecorder(), &http.Request{URL: &url.URL{RawQuery: "%%"}}); ok {
 		t.Fail()
 	}
 }
@@ -964,35 +979,153 @@ func TestSearchFiles(t *testing.T) {
 	}
 }
 
+func TestCopyTree(t *testing.T) {
+	dir := path.Join(dn, "copy")
+	err := removeIfExists(dir)
+	errFatal(t, err)
+	err = ensureDir(dir)
+	errFatal(t, err)
+
+	// no copy of the same path
+	fi0, err := os.Lstat(dir)
+	err = copyTree(dir, dir)
+	if err != nil {
+		t.Fail()
+	}
+	fi1, err := os.Lstat(dir)
+	if !fi1.ModTime().Equal(fi0.ModTime()) {
+		t.Fail()
+	}
+
+	// not found
+	dir0 := path.Join(dir, "dir0")
+	err = removeIfExists(dir0)
+	dir1 := path.Join(dir, "dir1")
+	err = removeIfExists(dir1)
+	errFatal(t, err)
+	err = copyTree(dir0, dir1)
+	if err == nil || !os.IsNotExist(err) {
+		t.Fail()
+	}
+
+	// no access
+	err = ensureDir(dir0)
+	errFatal(t, err)
+	err = removeIfExists(dir1)
+	errFatal(t, err)
+	err = os.Chmod(dir, 0600)
+	errFatal(t, err)
+	err = copyTree(dir0, dir1)
+	if !isPermission(err) {
+		t.Fail()
+	}
+	err = os.Chmod(dir, os.ModePerm)
+	errFatal(t, err)
+
+	// tree
+	err = ensureDir(dir0)
+	errFatal(t, err)
+	fp := path.Join(dir0, "some")
+	err = withNewFile(fp, nil)
+	errFatal(t, err)
+	err = removeIfExists(dir1)
+	errFatal(t, err)
+	err = copyTree(dir0, dir1)
+	if err != nil {
+		t.Fail()
+	}
+	_, err = os.Lstat(path.Join(dir1, "some"))
+	if err != nil {
+		t.Fail()
+	}
+
+	// copy abort
+	err = ensureDir(dir0)
+	errFatal(t, err)
+	err = withNewFile(fp, nil)
+	errFatal(t, err)
+	err = os.Chmod(fp, 0000)
+	err = removeIfExists(dir1)
+	errFatal(t, err)
+	err = copyTree(dir0, dir1)
+	if !isPermission(err) {
+		t.Fail()
+	}
+	_, err = os.Lstat(dir1)
+	if err != nil {
+		t.Fail()
+	}
+	_, err = os.Lstat(path.Join(dir1, "some"))
+	if !os.IsNotExist(err) {
+		t.Fail()
+	}
+	err = os.Chmod(fp, 0666)
+	errFatal(t, err)
+
+	// copy file, no write permission
+	f0, f1 := path.Join(dir, "file0"), path.Join(dir, "file1")
+	err = withNewFile(f0, nil)
+	errFatal(t, err)
+	err = removeIfExists(f1)
+	errFatal(t, err)
+	err = os.Chmod(dir, 0600)
+	errFatal(t, err)
+	err = copyTree(f0, f1)
+	if !isPermission(err) {
+		t.Fail()
+	}
+	err = os.Chmod(dir, 0777)
+	errFatal(t, err)
+
+	// copy file
+	err = withNewFile(f0, nil)
+	errFatal(t, err)
+	err = removeIfExists(f1)
+	errFatal(t, err)
+	err = copyTree(f0, f1)
+	if err != nil {
+		t.Fail()
+	}
+
+	// preserve mode
+	err = withNewFile(f0, nil)
+	errFatal(t, err)
+	err = os.Chmod(f0, 0400)
+	errFatal(t, err)
+	err = removeIfExists(f1)
+	errFatal(t, err)
+	err = copyTree(f0, f1)
+	if err != nil {
+		t.Fail()
+	}
+	fi, err := os.Lstat(f1)
+	if fi.Mode() != os.FileMode(0400) {
+		t.Fail()
+	}
+}
+
 func TestFileSearch(t *testing.T) {
 	var queryString url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileSearch(w, r, queryString)
 	}
 
-	p := path.Join(testdir, "search")
+	p := path.Join(dn, "search")
 	err := removeIfExists(p)
 	errFatal(t, err)
 	err = ensureDir(p)
 	errFatal(t, err)
 
 	checkError := func(err int) {
-		htreq(t, "SEARCH", s.URL+p, nil, func(rsp *http.Response) {
+		htreq(t, "SEARCH", s.URL+"/search", nil, func(rsp *http.Response) {
 			if rsp.StatusCode != err {
 				t.Fail()
 			}
 		})
 	}
 	checkBadReq := func() { checkError(http.StatusBadRequest) }
-
-	// max results set
-	for i := 0; i < 42; i++ {
-		pi := path.Join(p, fmt.Sprintf("file%d", i))
-		err := withNewFile(pi, nil)
-		errFatal(t, err)
-	}
 	checkLen := func(l int) {
-		htreq(t, "SEARCH", s.URL+p, nil, func(rsp *http.Response) {
+		htreq(t, "SEARCH", s.URL+"/search", nil, func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
 			}
@@ -1005,6 +1138,13 @@ func TestFileSearch(t *testing.T) {
 				t.Fail()
 			}
 		})
+	}
+
+	// max results set
+	for i := 0; i < 42; i++ {
+		pi := path.Join(p, fmt.Sprintf("file%d", i))
+		err := withNewFile(pi, nil)
+		errFatal(t, err)
 	}
 	queryString = make(url.Values)
 	checkLen(defaultMaxSearchResults)
@@ -1108,7 +1248,7 @@ func TestFileSearch(t *testing.T) {
 	mts["dirA"] = fid.ModTime().Unix()
 	sizeOfADir := fid.Size()
 	queryString = make(url.Values)
-	htreq(t, "SEARCH", s.URL+p, nil, func(rsp *http.Response) {
+	htreq(t, "SEARCH", s.URL+"/search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1151,13 +1291,10 @@ func TestFileProps(t *testing.T) {
 	}
 
 	fn := "some-file"
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
 
-	err = removeIfExists(p)
+	err := removeIfExists(p)
 	errFatal(t, err)
 	htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
@@ -1235,12 +1372,9 @@ func TestFilePropsRoot(t *testing.T) {
 	defer mx.Unlock()
 
 	fn := "some-file-uid"
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
-	err = withNewFile(p, nil)
+	err := withNewFile(p, nil)
 	errFatal(t, err)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileProps(w, r)
@@ -1307,12 +1441,9 @@ func TestFilePropsRoot(t *testing.T) {
 }
 
 func TestFileModprops(t *testing.T) {
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	fn := "some-file"
 	p := path.Join(dn, fn)
-	err = withNewFile(p, nil)
+	err := withNewFile(p, nil)
 	errFatal(t, err)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		fileModprops(w, r)
@@ -1415,12 +1546,9 @@ func TestFileModpropsRoot(t *testing.T) {
 	defer mx.Unlock()
 
 	fn := "some-file-uid-mod"
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
-	err = withNewFile(p, nil)
+	err := withNewFile(p, nil)
 	errFatal(t, err)
 	err = os.Chmod(p, os.ModePerm)
 	errFatal(t, err)
@@ -1457,9 +1585,6 @@ func TestFileModpropsRoot(t *testing.T) {
 }
 
 func TestGetDir(t *testing.T) {
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	fn := "some-dir"
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
@@ -1479,7 +1604,7 @@ func TestGetDir(t *testing.T) {
 	}
 
 	// not found
-	err = ensureDir(p)
+	err := ensureDir(p)
 	errFatal(t, err)
 	err = os.Chmod(p, os.ModePerm)
 	errFatal(t, err)
@@ -1592,9 +1717,6 @@ func TestGetDirRoot(t *testing.T) {
 	mx.Lock()
 	defer mx.Unlock()
 
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	fn := "some-dir"
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
@@ -1674,9 +1796,6 @@ func TestGetDirRoot(t *testing.T) {
 }
 
 func TestGetFile(t *testing.T) {
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	var (
 		f  *os.File
 		fi os.FileInfo
@@ -1689,7 +1808,7 @@ func TestGetFile(t *testing.T) {
 	fn := "some-file.html"
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
-	err = withNewFile(p, nil)
+	err := withNewFile(p, nil)
 	errFatal(t, err)
 	f, err = os.Open(p)
 	errFatal(t, err)
@@ -1793,9 +1912,6 @@ func TestFilePut(t *testing.T) {
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		filePut(w, r)
 	}
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 
 	// invalid path
 	htreq(t, "PUT", s.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
@@ -1805,7 +1921,7 @@ func TestFilePut(t *testing.T) {
 	})
 
 	// existing dir
-	err = os.MkdirAll(path.Join(dn, "dir"), os.ModePerm)
+	err := os.MkdirAll(path.Join(dn, "dir"), os.ModePerm)
 	errFatal(t, err)
 	htreq(t, "PUT", s.URL+"/dir", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
@@ -1896,6 +2012,11 @@ func TestFilePut(t *testing.T) {
 		if !bytes.Equal(content, []byte("some content")) {
 			t.Fail()
 		}
+		fi, err := os.Lstat(p)
+		errFatal(t, err)
+		if fi.Mode() != os.FileMode(0600) {
+			t.Fail()
+		}
 	})
 
 	// clear file
@@ -1936,6 +2057,96 @@ func TestFilePut(t *testing.T) {
 	})
 }
 
+func TestFileCoppy(t *testing.T) {
+	var qry url.Values
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileCopy(w, r, qry)
+	}
+
+	// no to
+	qry = make(url.Values)
+	htreq(t, "COPY", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// many tos
+	qry = make(url.Values)
+	qry.Add("to", "path0")
+	qry.Add("to", "path1")
+	htreq(t, "COPY", s.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// copy tree above self
+	qry = make(url.Values)
+	qry.Add("to", "/path/path0")
+	htreq(t, "COPY", s.URL+"/path/path0/path1", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// copy tree below self
+	qry = make(url.Values)
+	qry.Add("to", "/path/path0/path1")
+	htreq(t, "COPY", s.URL+"/path/path0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// no permission
+	p := path.Join(dn, "copy")
+	err := ensureDir(p)
+	errFatal(t, err)
+	p0, p1 := path.Join(p, "dir0"), path.Join(p, "dir1")
+	err = ensureDir(p0)
+	errFatal(t, err)
+	err = ensureDir(p1)
+	errFatal(t, err)
+	err = os.Chmod(p, 0000)
+	errFatal(t, err)
+	qry = make(url.Values)
+	qry.Add("to", "/copy/dir1")
+	htreq(t, "COPY", s.URL+"/copy/dir0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(p, 0777)
+	errFatal(t, err)
+
+	// copy to not existing
+	err = ensureDir(p0)
+	errFatal(t, err)
+	err = removeIfExists(p1)
+	errFatal(t, err)
+	qry = make(url.Values)
+	qry.Add("to", "/copy/dir1/dir0")
+	htreq(t, "COPY", s.URL+"/copy/dir0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+
+	// copy to existing
+	err = ensureDir(p0)
+	errFatal(t, err)
+	err = ensureDir(p1)
+	errFatal(t, err)
+	qry = make(url.Values)
+	qry.Add("to", "/copy/dir1")
+	htreq(t, "COPY", s.URL+"/copy/dir0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+}
+
 func TestOptions(t *testing.T) {
 	thnd.sh = handler
 	htreq(t, "OPTIONS", s.URL, nil, func(rsp *http.Response) {
@@ -1953,7 +2164,6 @@ func TestSearch(t *testing.T) {
 			t.Fail()
 		}
 	})
-	dn = testdir
 	for i := 0; i < 3; i++ {
 		err := withNewFile(path.Join(dn, fmt.Sprintf("file%d", i)), nil)
 		errFatal(t, err)
@@ -1975,9 +2185,6 @@ func TestSearch(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	thnd.sh = handler
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 
 	// cmd can be props or search only
 	htreq(t, "GET", s.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
@@ -2005,7 +2212,7 @@ func TestGet(t *testing.T) {
 	fn := "some-file"
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
-	err = removeIfExists(p)
+	err := removeIfExists(p)
 	errFatal(t, err)
 	htreq(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
@@ -2014,17 +2221,19 @@ func TestGet(t *testing.T) {
 	})
 
 	// listing if directory
-	err = os.RemoveAll(dn)
+	dir := path.Join(dn, "search")
+	err = removeIfExists(dir)
 	errFatal(t, err)
-	err = ensureDir(dn)
+	err = ensureDir(dir)
 	errFatal(t, err)
-	c := []byte("some-content")
+	c := []byte("some content")
+	p = path.Join(dir, "some-file")
 	err = withNewFile(p, func(f *os.File) error {
 		_, err = f.Write(c)
 		return err
 	})
 	errFatal(t, err)
-	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
+	htreq(t, "GET", s.URL+"/search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2038,7 +2247,7 @@ func TestGet(t *testing.T) {
 	})
 
 	// file otherwise
-	htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	htreq(t, "GET", s.URL+"/search/some-file", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2052,12 +2261,9 @@ func TestGet(t *testing.T) {
 
 func TestProps(t *testing.T) {
 	thnd.sh = handler
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	fn := "some-file"
 	p := path.Join(dn, fn)
-	err = withNewFile(p, nil)
+	err := withNewFile(p, nil)
 	if err != nil {
 		t.Fatal()
 	}
@@ -2075,12 +2281,9 @@ func TestProps(t *testing.T) {
 
 func TestModprops(t *testing.T) {
 	thnd.sh = handler
-	dn = path.Join(testdir, "http")
-	err := ensureDir(dn)
-	errFatal(t, err)
 	fn := "some-file"
 	p := path.Join(dn, fn)
-	err = withNewFile(p, nil)
+	err := withNewFile(p, nil)
 	if err != nil {
 		t.Fatal()
 	}
@@ -2099,7 +2302,6 @@ func TestModprops(t *testing.T) {
 
 func TestPut(t *testing.T) {
 	thnd.sh = handler
-	dn = path.Join(testdir, "http")
 
 	// invalid command
 	htreq(t, "PUT", s.URL+"?cmd=some", nil, func(rsp *http.Response) {
@@ -2118,6 +2320,24 @@ func TestPut(t *testing.T) {
 		}
 		_, err := os.Lstat(p)
 		if err != nil {
+			t.Fail()
+		}
+	})
+}
+
+func TestCopy(t *testing.T) {
+	thnd.sh = handler
+
+	// invalid query
+	htreq(t, "COPY", s.URL+"?%%", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// invalid command
+	htreq(t, "COPY", s.URL+"?cmd=some", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
