@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+func errFatal(t *testing.T, err error) {
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func withEnv(key, val string, f func() error) error {
 	orig := os.Getenv(key)
 	defer doretlog42(func() error { return os.Setenv(key, orig) })
@@ -29,11 +35,18 @@ func withNewFile(fn string, do func(*os.File) error) error {
 	if err != nil {
 		return err
 	}
-	defer doretlog42(f.Close)
 	if do == nil {
 		return nil
 	}
-	return do(f)
+	err = do(f)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func withNewFileF(t *testing.T, fn string, do func(*os.File) error) {
+	errFatal(t, withNewFile(fn, do))
 }
 
 func removeIfExists(fn string) error {
@@ -42,6 +55,26 @@ func removeIfExists(fn string) error {
 		return nil
 	}
 	return err
+}
+
+func removeIfExistsF(t *testing.T, fn string) {
+	errFatal(t, removeIfExists(fn))
+}
+
+func ensureDirF(t *testing.T, dir string) {
+	errFatal(t, ensureDir(dir))
+}
+
+func withNewDir(dir string) error {
+	err := removeIfExists(dir)
+	if err != nil {
+		return err
+	}
+	return ensureDir(dir)
+}
+
+func withNewDirF(t *testing.T, dir string) {
+	errFatal(t, withNewDir(dir))
 }
 
 func TestDoRetryReport(t *testing.T) {
@@ -86,11 +119,5 @@ func TestDoRetryReport(t *testing.T) {
 	<-done
 	if c != 2 || len(errs) != 2 {
 		t.Fail()
-	}
-}
-
-func errFatal(t *testing.T, err error) {
-	if err != nil {
-		t.Fatal(err)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,7 +16,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -31,7 +31,7 @@ const (
 	searchQueryMax          = "max"
 	searchQueryName         = "name"
 	searchQueryContent      = "content"
-	copyToKey               = "to"
+	copyRenameToKey         = "to"
 )
 
 type fileInfo struct {
@@ -45,6 +45,22 @@ func (fi *fileInfo) Mode() os.FileMode  { return fi.sys.Mode() }
 func (fi *fileInfo) ModTime() time.Time { return fi.sys.ModTime() }
 func (fi *fileInfo) IsDir() bool        { return fi.sys.IsDir() }
 func (fi *fileInfo) Sys() interface{}   { return fi.sys.Sys() }
+
+type maxReader struct {
+	reader io.Reader
+	count  int64
+}
+
+func (mr *maxReader) Read(b []byte) (n int, err error) {
+	if mr.count < 0 {
+		return 0, errors.New("Maximum read count exceeded.")
+	}
+	n, err = mr.reader.Read(b)
+	mr.count = mr.count - int64(n)
+	return
+}
+
+type queryHandler func(http.ResponseWriter, *http.Request, url.Values)
 
 var (
 	dn                  string // directory opened for HTTP
@@ -143,6 +159,12 @@ func checkOsError(w http.ResponseWriter, err error) bool {
 		}
 		if serr, ok := err.(*os.SyscallError); ok {
 			if errno, ok := serr.Err.(syscall.Errno); ok {
+				handleErrno(w, errno)
+				return false
+			}
+		}
+		if lerr, ok := err.(*os.LinkError); ok {
+			if errno, ok := lerr.Err.(syscall.Errno); ok {
 				handleErrno(w, errno)
 				return false
 			}
@@ -282,7 +304,7 @@ func copyTree(from, to string) error {
 	}
 	defer doretlog42(ff.Close)
 	if fi.IsDir() {
-		err = os.MkdirAll(to, os.ModePerm)
+		err = os.Mkdir(to, os.ModePerm)
 		if err != nil {
 			return err
 		}
@@ -308,6 +330,24 @@ func copyTree(from, to string) error {
 		}
 	}
 	return os.Chmod(to, fi.Mode())
+}
+
+func pathIntersect(p0, p1 string) int {
+	if len(p0) == len(p1) {
+		if p0 == p1 {
+			return 3
+		}
+		return 0
+	}
+	res := 1
+	if len(p0) < len(p1) {
+		p0, p1 = p1, p0
+		res = 2
+	}
+	if p0[:len(p1)] != p1 || p0[len(p1)] != '/' {
+		res = 0
+	}
+	return res
 }
 
 func fileSearch(w http.ResponseWriter, r *http.Request, qry url.Values) {
@@ -422,10 +462,10 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 }
 
 func fileModprops(w http.ResponseWriter, r *http.Request) {
-	br := http.MaxBytesReader(w, r.Body, maxRequestBody)
-	defer doretlog42(br.Close)
-	b, err := ioutil.ReadAll(br)
-	if !checkHandle(w, err == nil, http.StatusRequestEntityTooLarge) {
+	mr := &maxReader{reader: r.Body, count: maxRequestBody}
+	b, err := ioutil.ReadAll(mr)
+	if !checkHandle(w, mr.count >= 0, http.StatusRequestEntityTooLarge) ||
+		!checkServerError(w, err == nil) {
 		return
 	}
 	var m map[string]interface{}
@@ -522,43 +562,66 @@ func filePut(w http.ResponseWriter, r *http.Request) {
 	if !checkOsError(w, err) {
 		return
 	}
-	_, err = io.Copy(f, r.Body)
-	checkOsError(w, err)
+	mr := &maxReader{reader: r.Body, count: maxRequestBody}
+	_, err = io.Copy(f, mr)
+	if checkHandle(w, mr.count >= 0, http.StatusRequestEntityTooLarge) {
+		checkOsError(w, err)
+	}
 }
 
-func fileCopy(w http.ResponseWriter, r *http.Request, qry url.Values) {
-	tos, ok := qry[copyToKey]
-	if !checkBadReq(w, ok && len(tos) == 1) {
-		return
+func fileCopyRename(multi bool, f func(string, string) error) queryHandler {
+	return func(w http.ResponseWriter, r *http.Request, qry url.Values) {
+		tos, ok := qry[copyRenameToKey]
+		if !checkBadReq(w, ok && (multi || len(tos) == 1)) {
+			return
+		}
+		from := path.Join(dn, r.URL.Path)
+		for _, to := range tos {
+			to := path.Join(dn, to)
+			if !checkBadReq(w, pathIntersect(from, to) == 0) {
+				return
+			}
+			err := f(from, to)
+			if !checkOsError(w, err) {
+				return
+			}
+		}
 	}
-	from := path.Join(dn, r.URL.Path)
-	to := path.Join(dn, tos[0])
-	if !checkBadReq(w, strings.Index(to, from) != 0 && strings.Index(from, to) != 0) {
-		return
+}
+
+var (
+	fileCopy   = fileCopyRename(true, copyTree)
+	fileRename = fileCopyRename(false, os.Rename)
+)
+
+func noCmd(f http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := checkQryCmd(w, r)
+		if !ok {
+			return
+		}
+		f(w, r)
 	}
-	err := os.RemoveAll(to)
-	if err != nil && !os.IsNotExist(err) {
-		checkOsError(w, err)
-		return
+}
+
+func queryNoCmd(f queryHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		qry, err := url.ParseQuery(r.URL.RawQuery)
+		if !checkBadReq(w, err == nil) {
+			return
+		}
+		if _, ok := checkQryValuesCmd(w, qry); !ok {
+			return
+		}
+		f(w, r, qry)
 	}
-	err = copyTree(from, to)
-	checkOsError(w, err)
 }
 
 func options(w http.ResponseWriter, r *http.Request) {
 	// no-op
 }
 
-func search(w http.ResponseWriter, r *http.Request) {
-	qry, err := url.ParseQuery(r.URL.RawQuery)
-	if !checkBadReq(w, err == nil) {
-		return
-	}
-	if _, ok := checkQryValuesCmd(w, qry); !ok {
-		return
-	}
-	fileSearch(w, r, qry)
-}
+var search = queryNoCmd(fileSearch)
 
 func get(w http.ResponseWriter, r *http.Request) {
 	qry, err := url.ParseQuery(r.URL.RawQuery)
@@ -595,43 +658,13 @@ func get(w http.ResponseWriter, r *http.Request) {
 	getFile(w, r, f, fi)
 }
 
-func props(w http.ResponseWriter, r *http.Request) {
-	_, ok := checkQryCmd(w, r)
-	if !ok {
-		return
-	}
-	fileProps(w, r)
-}
-
-func modprops(w http.ResponseWriter, r *http.Request) {
-	_, ok := checkQryCmd(w, r)
-	if !ok {
-		return
-	}
-	fileModprops(w, r)
-}
-
-func put(w http.ResponseWriter, r *http.Request) {
-	_, ok := checkQryCmd(w, r)
-	if !ok {
-		return
-	}
-	filePut(w, r)
-}
-
-func copy(w http.ResponseWriter, r *http.Request) {
-	qry, err := url.ParseQuery(r.URL.RawQuery)
-	if !checkBadReq(w, err == nil) {
-		return
-	}
-	if _, ok := checkQryValuesCmd(w, qry); !ok {
-		return
-	}
-	fileCopy(w, r, qry)
-}
-
-func rename(w http.ResponseWriter, r *http.Request) {
-}
+var (
+	props    = noCmd(fileProps)
+	modprops = noCmd(fileModprops)
+	put      = noCmd(filePut)
+	copy     = queryNoCmd(fileCopy)
+	rename   = queryNoCmd(fileRename)
+)
 
 func delete(w http.ResponseWriter, r *http.Request) {
 	err := os.RemoveAll(path.Join(dn, r.URL.Path))
