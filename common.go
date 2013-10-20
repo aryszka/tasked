@@ -30,7 +30,3 @@ func doretlog(do func() error, delay time.Duration) {
 func doretlog42(do func() error) {
 	doretlog(do, 42*time.Millisecond)
 }
-
-func trace(args ...interface{}) {
-	log.Println(args...)
-}

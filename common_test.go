@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	"log"
 )
 
 func errFatal(t *testing.T, err error) {
@@ -75,6 +76,10 @@ func withNewDir(dir string) error {
 
 func withNewDirF(t *testing.T, dir string) {
 	errFatal(t, withNewDir(dir))
+}
+
+func trace(args ...interface{}) {
+	log.Println(args...)
 }
 
 func TestDoRetryReport(t *testing.T) {

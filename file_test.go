@@ -289,6 +289,52 @@ func isPermission(err error) bool {
 	return false
 }
 
+func TestMaxReader(t *testing.T) {
+	buf := bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr := &maxReader{reader: buf, count: 0}
+	b := make([]byte, 32)
+	n, err := mr.Read(b)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+
+	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr = &maxReader{reader: buf, count: 6}
+	b = make([]byte, 32)
+	n, err = mr.Read(b)
+	if n != 6 || err != nil || mr.count != 0 {
+		t.Fail()
+	}
+	n, err = mr.Read(b)
+	if n != 0 || err == nil || mr.count != 0 {
+		t.Fail()
+	}
+
+	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr = &maxReader{reader: buf, count: 12}
+	b = make([]byte, 32)
+	n, err = mr.Read(b)
+	if n != 12 || err != nil || mr.count != 0 {
+		t.Fail()
+	}
+	n, err = mr.Read(b)
+	if n != 0 || err == nil || mr.count != 0 {
+		t.Fail()
+	}
+
+	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr = &maxReader{reader: buf, count: 64}
+	b = make([]byte, 32)
+	n, err = mr.Read(b)
+	if n != 12 || err != nil || mr.count != 52 {
+		t.Fail()
+	}
+	n, err = mr.Read(b)
+	if n != 0 || err != io.EOF || mr.count != 52 {
+		t.Fail()
+	}
+}
+
 func TestToPropertyMap(t *testing.T) {
 	var (
 		defaultTime time.Time
@@ -366,7 +412,30 @@ func TestToPropertyMap(t *testing.T) {
 	}
 }
 
-func TestGetValues(t *testing.T) {
+func TestPathIntersect(t *testing.T) {
+	// equal length, not equal
+	s0, s1 := "some/one", "some/two"
+	if pathIntersect(s0, s1) != 0 || pathIntersect(s1, s0) != 0 {
+		t.Fail()
+	}
+
+	// equal length, equal
+	s0, s1 = "some/path", "some/path"
+	if pathIntersect(s0, s1) != 3 {
+		t.Fail()
+	}
+
+	// not equal length, not intersect
+	s0, s1 = "some/path", "some/pathbutdifferent"
+	if pathIntersect(s0, s1) != 0 || pathIntersect(s1, s0) != 0 {
+		t.Fail()
+	}
+
+	// not equal length, intersect
+	s0, s1 = "some/path", "some/path/inside"
+	if pathIntersect(s0, s1) != 2 || pathIntersect(s1, s0) != 1 {
+		t.Fail()
+	}
 }
 
 func TestErrorResponse(t *testing.T) {
@@ -646,9 +715,11 @@ func TestIsOwner(t *testing.T) {
 }
 
 func TestWriteJsonResponse(t *testing.T) {
-	js := []byte("{\"some\": \"data\"}")
+	d := map[string]interface{}{"some": "data"}
+	js, err := json.Marshal(d)
+	errFatal(t, err)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		writeJsonResponse(w, r, js)
+		writeJsonResponse(w, r, d)
 	}
 	htreq(t, "GET", s.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
@@ -663,6 +734,11 @@ func TestWriteJsonResponse(t *testing.T) {
 		b, err := ioutil.ReadAll(rsp.Body)
 		errFatal(t, err)
 		if !bytes.Equal(b, js) {
+			t.Fail()
+		}
+		var jsBack map[string]interface{}
+		err = json.Unmarshal(b, &jsBack)
+		if err != nil || len(jsBack) != 1 || jsBack["some"] != "data" {
 			t.Fail()
 		}
 	})
@@ -1148,28 +1224,79 @@ func TestCopyTreeNotRoot(t *testing.T) {
 	}
 }
 
-func TestPathIntersect(t *testing.T) {
-	// equal length, not equal
-	s0, s1 := "some/one", "some/two"
-	if pathIntersect(s0, s1) != 0 || pathIntersect(s1, s0) != 0 {
+func TestGetPath(t *testing.T) {
+	p, err := getPath("..")
+	if err == nil {
+		t.Fail()
+	}
+	p, err = getPath("some")
+	if err != nil || p != path.Join(dn, "some") {
+		t.Fail()
+	}
+}
+
+func TestQryNum(t *testing.T) {
+	qry := make(url.Values)
+	n, err := getQryNum(qry, "some")
+	if n != 0 || err != nil {
 		t.Fail()
 	}
 
-	// equal length, equal
-	s0, s1 = "some/path", "some/path"
-	if pathIntersect(s0, s1) != 3 {
+	qry.Add("some", "0")
+	qry.Add("some", "1")
+	n, err = getQryNum(qry, "some")
+	if err == nil {
 		t.Fail()
 	}
 
-	// not equal length, not intersect
-	s0, s1 = "some/path", "some/pathbutdifferent"
-	if pathIntersect(s0, s1) != 0 || pathIntersect(s1, s0) != 0 {
+	qry = make(url.Values)
+	qry.Add("some", "val")
+	n, err = getQryNum(qry, "some")
+	if err == nil {
 		t.Fail()
 	}
 
-	// not equal length, intersect
-	s0, s1 = "some/path", "some/path/inside"
-	if pathIntersect(s0, s1) != 2 || pathIntersect(s1, s0) != 1 {
+	qry = make(url.Values)
+	qry.Add("some", "42")
+	n, err = getQryNum(qry, "some")
+	if n != 42 || err != nil {
+		t.Fail()
+	}
+}
+
+func TestGetQryExpression(t *testing.T) {
+	qry := make(url.Values)
+	qry.Add("some", "val0")
+	qry.Add("some", "val1")
+	x, err := getQryExpression(qry, "some")
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = make(url.Values)
+	x, err = getQryExpression(qry, "some")
+	if x != nil || err != nil {
+		t.Fail()
+	}
+
+	qry = make(url.Values)
+	qry.Add("some", "")
+	x, err = getQryExpression(qry, "some")
+	if x != nil || err != nil {
+		t.Fail()
+	}
+
+	qry = make(url.Values)
+	qry.Add("some", "(")
+	x, err = getQryExpression(qry, "some")
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = make(url.Values)
+	qry.Add("some", "val")
+	x, err = getQryExpression(qry, "some")
+	if x == nil || err != nil {
 		t.Fail()
 	}
 }
@@ -1203,6 +1330,9 @@ func TestFileSearch(t *testing.T) {
 			err = json.Unmarshal(js, &m)
 			errFatal(t, err)
 			if len(m) != l {
+				t.Log(len(m))
+				t.Log(l)
+				t.Log(queryString)
 				t.Fail()
 			}
 		})
@@ -2325,7 +2455,6 @@ func TestFileRename(t *testing.T) {
 	qry.Set("to", "rename/dir1/file1")
 	htreq(t, "RENAME", s.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
-			t.Log(rsp.StatusCode)
 			t.Fail()
 		}
 		_, err := os.Lstat(fn0)
@@ -2356,7 +2485,6 @@ func TestFileRename(t *testing.T) {
 	withNewFileF(t, fn0, nil)
 	qry = make(url.Values)
 	qry.Set("to", "/rename/dir0")
-	trace("entering")
 	htreq(t, "RENAME", s.URL+"/rename/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
