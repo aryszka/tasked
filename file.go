@@ -272,29 +272,34 @@ func searchFiles(dirs []*fileInfo, max int, qry func(fi *fileInfo) bool) []*file
 	if max <= 0 || len(dirs) == 0 {
 		return nil
 	}
-	var res []*fileInfo
-	di := dirs[0]
-	dirs = dirs[1:]
-	p := path.Join(di.dirname, di.Name())
-	if d, err := os.Open(p); err == nil {
+	return append(func() (res []*fileInfo) {
+		di := dirs[0]
+		dirs = dirs[1:]
+		p := path.Join(di.dirname, di.Name())
+		d, err := os.Open(p)
+		if err != nil {
+			return
+		}
 		defer doretlog42(d.Close)
-		if fis, err := d.Readdir(0); err == nil {
-			for _, fi := range fis {
-				fii := &fileInfo{sys: fi, dirname: p}
-				if qry(fii) {
-					res = append(res, fii)
-					max = max - 1
-					if max == 0 {
-						return res
-					}
-				}
-				if fii.IsDir() {
-					dirs = append(dirs, fii)
+		fis, err := d.Readdir(0)
+		if err != nil {
+			return
+		}
+		for _, fi := range fis {
+			fii := &fileInfo{sys: fi, dirname: p}
+			if qry(fii) {
+				res = append(res, fii)
+				max = max - 1
+				if max == 0 {
+					return res
 				}
 			}
+			if fii.IsDir() {
+				dirs = append(dirs, fii)
+			}
 		}
-	}
-	return append(res, searchFiles(dirs, max, qry)...)
+		return
+	}(), searchFiles(dirs, max, qry)...)
 }
 
 func copyTree(from, to string) error {
@@ -611,6 +616,12 @@ func fileDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func fileMkdir(w http.ResponseWriter, r *http.Request) {
+	p, err := getPath(r.URL.Path)
+	if !checkHandle(w, err == nil, http.StatusNotFound) {
+		return
+	}
+	err = os.MkdirAll(p, os.ModePerm)
+	checkOsError(w, err)
 }
 
 func noCmd(f http.HandlerFunc) http.HandlerFunc {

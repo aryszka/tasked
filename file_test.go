@@ -112,72 +112,6 @@ func verifyHeader(expect, have map[string][]string) bool {
 
 func getFunc(c *http.Client, url string) (*http.Response, error) { return c.Get(url) }
 
-// func checkFile(content []byte) (bool, error) {
-// 	f, err := os.Open(fn)
-// 	if os.IsNotExist(err) {
-// 		return false, nil
-// 	}
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	defer f.Close()
-// 	contentDsk, err := ioutil.ReadAll(f)
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	return bytes.Equal(contentDsk, content), nil
-// }
-
-// func testReq(body []byte, code int, header http.Header,
-// 	req func(*http.Client, string) (*http.Response, error), t *testing.T) {
-// 	s := serveTest(t, nil)
-// 	c := mkclient()
-// 	rsp, err := req(c, s.URL)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	defer rsp.Body.Close()
-// 	if rsp.StatusCode != code {
-// 		t.Fail()
-// 	}
-// 	verifyHeader
-// 	rspBody, err := ioutil.ReadAll(rsp.Body)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	if strings.TrimRight(string(rspBody), "\n\r") != string(body) {
-// 		t.Fail()
-// 	}
-// }
-
-// func testGet(body []byte, code int, header http.Header, t *testing.T) {
-// 	testReq(body, code, header, func(c *http.Client, url string) (*http.Response, error) {
-// 		return c.Get(url)
-// 	}, t)
-// }
-
-// func testPut(content, body []byte, code int, t *testing.T) {
-// 	testReq(body, code, nil,
-// 		func(c *http.Client, url string) (*http.Response, error) {
-// 			req, err := http.NewRequest("PUT", url, bytes.NewBuffer(content))
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			return c.Do(req)
-// 		}, t)
-// }
-
-// func testDelete(body []byte, code int, t *testing.T) {
-// 	testReq(body, code, nil,
-// 		func(c *http.Client, url string) (*http.Response, error) {
-// 			req, err := http.NewRequest("DELETE", url, nil)
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			return c.Do(req)
-// 		}, t)
-// }
-
 func convert64(m map[string]interface{}, n string) (ok bool) {
 	var (
 		v interface{}
@@ -1330,9 +1264,6 @@ func TestFileSearch(t *testing.T) {
 			err = json.Unmarshal(js, &m)
 			errFatal(t, err)
 			if len(m) != l {
-				t.Log(len(m))
-				t.Log(l)
-				t.Log(queryString)
 				t.Fail()
 			}
 		})
@@ -2557,6 +2488,99 @@ func TestFileRenameNotRoot(t *testing.T) {
 	errFatal(t, err)
 }
 
+func TestFileDelete(t *testing.T) {
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileDelete(w, r)
+	}
+	dir := path.Join(dn, "delete")
+	removeIfExistsF(t, dir)
+	ensureDirF(t, dir)
+
+	// no permission
+	dir0 := path.Join(dir, "dir0")
+	ensureDirF(t, dir0)
+	file0 := path.Join(dir0, "file0")
+	withNewFileF(t, file0, nil)
+	err := os.Chmod(dir0, 0500)
+	errFatal(t, err)
+	htreq(t, "DELETE", s.URL + "/delete/dir0/file0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dir0, 0700)
+	errFatal(t, err)
+
+	// doesn't exist
+	removeIfExistsF(t, file0)
+	htreq(t, "DELETE", s.URL + "/delete/dir0/file0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+
+	// exists, deleted
+	withNewFileF(t, file0, nil)
+	htreq(t, "DELETE", s.URL + "/delete/dir0/file0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(file0); !os.IsNotExist(err) {
+			t.Fail()
+		}
+	})
+}
+
+func TestFileMkdir(t *testing.T) {
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		fileMkdir(w, r)
+	}
+	dir := path.Join(dn, "mkdir")
+	removeIfExistsF(t, dir)
+	ensureDirF(t, dir)
+
+	// no permission
+	dir0 := path.Join(dir, "dir0")
+	ensureDirF(t, dir0)
+	err := os.Chmod(dir0, 0500)
+	errFatal(t, err)
+	dir1 := path.Join(dir0, "dir1")
+	htreq(t, "MKDIR", s.URL + "/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+		if _, err := os.Lstat(dir1); !os.IsNotExist(err) {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dir0, 0700)
+	errFatal(t, err)
+
+	// doesn't exist, created
+	removeIfExistsF(t, dir1)
+	htreq(t, "MKDIR", s.URL + "/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(dir1); err != nil {
+			t.Fail()
+		}
+	})
+
+	// exists, not touched
+	ensureDirF(t, dir1)
+	file0 := path.Join(dir1, "file0")
+	withNewFileF(t, file0, nil)
+	htreq(t, "MKDIR", s.URL + "/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(file0); err != nil {
+			t.Fail()
+		}
+	})
+}
+
 func TestNoCmd(t *testing.T) {
 	thnd.sh = noCmd(func(w http.ResponseWriter, r *http.Request) {})
 	htreq(t, "GET", s.URL+"?%%", nil, func(rsp *http.Response) {
@@ -2824,64 +2848,100 @@ func TestCopy(t *testing.T) {
 	})
 }
 
-// func TestDelete(t *testing.T) {
-// 	// until custom rights checking, skip these tests, if root
-// 	if isRoot {
-// 		t.Skip()
-// 	}
-//
-// 	// exists no permission to write
-// 	err := withNewFile(fn, nil)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	func() {
-// 		err = os.Chmod(fn, os.FileMode(os.ModePerm&^(1<<7)))
-// 		if err != nil {
-// 			t.Fatal()
-// 		}
-// 		defer os.Chmod(fn, os.ModePerm)
-// 		testDelete([]byte(http.StatusText(http.StatusUnauthorized)), http.StatusUnauthorized, t)
-// 		ok, err := checkFile(nil)
-// 		if err != nil {
-// 			t.Fatal()
-// 		}
-// 		if !ok {
-// 			t.Fail()
-// 		}
-// 	}()
-//
-// 	// doesn't exist
-// 	err = os.Remove(fn)
-// 	if err != nil && !os.IsNotExist(err) {
-// 		t.Fatal(err)
-// 	}
-// 	testDelete(nil, http.StatusOK, t)
-// 	ok, err := checkFile(nil)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	if ok {
-// 		t.Fail()
-// 	}
-//
-// 	// exists
-// 	err = withNewFile(fn, func(f *os.File) error {
-// 		_, err := f.Write([]byte("hello"))
-// 		return err
-// 	})
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	testDelete(nil, http.StatusOK, t)
-// 	ok, err = checkFile(nil)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	if ok {
-// 		t.Fail()
-// 	}
-// }
+func TestPost(t *testing.T) {
+	thnd.sh = handler
+
+	// invalid query
+	htreq(t, "POST", s.URL + "?%%", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	// invalid command
+	htreq(t, "POST", s.URL + "?cmd=invalid", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	dir := path.Join(dn, "post")
+	removeIfExistsF(t, dir)
+	ensureDirF(t, dir)
+
+	// modprops
+	file := path.Join(dir, "file")
+	withNewFileF(t, file, nil)
+	err := os.Chmod(file, 0600)
+	errFatal(t, err)
+	fi, err := os.Lstat(file)
+	errFatal(t, err)
+	props := toPropertyMap(fi, false)
+	props["mode"] = 0660
+	js, err := json.Marshal(props)
+	htreq(t, "POST", s.URL + "/post/file?cmd=modprops", bytes.NewBuffer(js), func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		fi, err := os.Lstat(file)
+		errFatal(t, err)
+		if fi.Mode() != os.FileMode(0660) {
+			t.Fail()
+		}
+	})
+
+	// delete
+	withNewFileF(t, file, nil)
+	htreq(t, "POST", s.URL + "/post/file?cmd=delete", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		_, err := os.Lstat(file)
+		if !os.IsNotExist(err) {
+			t.Fail()
+		}
+	})
+
+	// mkdir
+	dir0 := path.Join(dir, "dir0")
+	removeIfExistsF(t, dir0)
+	htreq(t, "POST", s.URL + "/post/dir0?cmd=mkdir", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(dir0); err != nil {
+			t.Fail()
+		}
+	})
+
+	// copy
+	withNewFileF(t, file, nil)
+	file0 := path.Join(dir, "file0")
+	removeIfExistsF(t, file0)
+	htreq(t, "POST", s.URL + "/post/file?cmd=copy&to=/post/file0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(file0); err != nil {
+			t.Fail()
+		}
+	})
+
+	// rename
+	withNewFileF(t, file, nil)
+	removeIfExistsF(t, file0)
+	htreq(t, "POST", s.URL + "/post/file?cmd=rename&to=/post/file0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(file); !os.IsNotExist(err) {
+			t.Fail()
+		}
+		if _, err = os.Lstat(file0); err != nil {
+			t.Fail()
+		}
+	})
+}
 
 func TestNotSupported(t *testing.T) {
 	thnd.sh = handler
@@ -2896,62 +2956,3 @@ func TestNotSupported(t *testing.T) {
 	test("CONNECT")
 	test("TINAM")
 }
-
-// func TestMultipleRequests(t *testing.T) {
-// 	// until custom rights checking, skip these tests, if root
-// 	if isRoot {
-// 		t.Skip()
-// 	}
-//
-// 	hello := []byte("hello")
-// 	client := mkclient()
-//
-// 	// start server
-// 	server, err := serveTest(http.HandlerFunc(handler))
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	defer server.Close()
-//
-// 	// get file notfound
-// 	err = os.Remove(fn)
-// 	if err != nil && !os.IsNotExist(err) {
-// 		t.Fatal()
-// 	}
-// 	rsp, err := client.Get(server.URL)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	defer rsp.Body.Close()
-// 	if rsp.StatusCode != http.StatusNotFound {
-// 		t.Fail()
-// 	}
-//
-// 	// put file
-// 	req, err := http.NewRequest("PUT", server.URL, bytes.NewBuffer(hello))
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	rsp, err = client.Do(req)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	defer rsp.Body.Close()
-// 	if rsp.StatusCode != http.StatusOK {
-// 		t.Fail()
-// 	}
-//
-// 	// get file
-// 	rsp, err = client.Get(server.URL)
-// 	if err != nil {
-// 		t.Fatal()
-// 	}
-// 	defer rsp.Body.Close()
-// 	if rsp.StatusCode != http.StatusOK {
-// 		t.Fail()
-// 	}
-// 	body, err := ioutil.ReadAll(rsp.Body)
-// 	if !bytes.Equal(body, hello) {
-// 		t.Fail()
-// 	}
-// }
