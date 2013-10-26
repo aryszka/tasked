@@ -23,7 +23,7 @@ func lookupGroupName(gid uint32) (string, error) {
 	var (
 		grp C.struct_group
 		res *C.struct_group
-		bs = C.size_t(maxGetGrpSize)
+		bs  = C.size_t(maxGetGrpSize)
 	)
 	buf := C.malloc(bs)
 	defer C.free(buf)

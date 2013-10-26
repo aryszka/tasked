@@ -1,9 +1,9 @@
 package main
 
 import (
-	"testing"
 	"os/user"
 	"strconv"
+	"testing"
 )
 
 func TestLookupGroupName(t *testing.T) {

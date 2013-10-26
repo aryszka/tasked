@@ -2,10 +2,10 @@ package main
 
 import (
 	"errors"
+	"log"
 	"os"
 	"testing"
 	"time"
-	"log"
 )
 
 func errFatal(t *testing.T, err error) {

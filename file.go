@@ -22,7 +22,7 @@ import (
 
 const (
 	jsonContentType         = "application/json; charset=utf-8"
-	defaultMaxRequestBody   = 1 << 30               // todo: make this configurable
+	defaultMaxRequestBody   = 1 << 30 // todo: make this configurable
 	modeMask                = os.FileMode(1)<<9 - 1
 	defaultMaxSearchResults = 30
 	searchQueryMax          = "max"
@@ -65,10 +65,10 @@ type queryHandler func(http.ResponseWriter, *http.Request, url.Values)
 
 var (
 	dn                  string
-	headerContentType          = http.CanonicalHeaderKey("content-type")
-	headerContentLength        = http.CanonicalHeaderKey("content-length")
-	maxRequestBody      int64  = defaultMaxRequestBody
-	marshalError error = errors.New("Marshaling error.")
+	headerContentType         = http.CanonicalHeaderKey("content-type")
+	headerContentLength       = http.CanonicalHeaderKey("content-length")
+	maxRequestBody      int64 = defaultMaxRequestBody
+	marshalError        error = errors.New("Marshaling error.")
 
 	textMimeTypes = map[string]string{
 		"css":    "text/css; charset=utf-8",
@@ -660,13 +660,13 @@ var (
 )
 
 const (
-	cmdProps  = "props"
-	cmdSearch = "search"
+	cmdProps    = "props"
+	cmdSearch   = "search"
 	cmdModprops = "modprops"
-	cmdDelete = "delete"
-	cmdMkdir = "mkdir"
-	cmdCopy = "copy"
-	cmdRename = "rename"
+	cmdDelete   = "delete"
+	cmdMkdir    = "mkdir"
+	cmdCopy     = "copy"
+	cmdRename   = "rename"
 )
 
 func get(w http.ResponseWriter, r *http.Request) {
@@ -746,6 +746,7 @@ var reqmap = map[string]func(http.ResponseWriter, *http.Request){
 	"POST":     post}
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	// todo: document that the accept headers are simply ignored
 	h := reqmap[r.Method]
 	if h == nil {
 		errorResponse(w, http.StatusMethodNotAllowed)

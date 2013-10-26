@@ -356,25 +356,25 @@ func TestToPropertyMap(t *testing.T) {
 	g, err := lookupGroupName(uint32(gid))
 	errFatal(t, err)
 	p = toPropertyMap(&fileInfoT{
-		name: "some",
-		size: 42,
+		name:    "some",
+		size:    42,
 		modTime: defaultTime,
-		isDir: false,
-		mode: os.ModePerm,
+		isDir:   false,
+		mode:    os.ModePerm,
 		sys: &syscall.Stat_t{
-			Uid: uint32(uid),
-			Gid: uint32(gid),
+			Uid:  uint32(uid),
+			Gid:  uint32(gid),
 			Atim: syscall.Timespec{Sec: defaultTime.Unix() + 42},
 			Ctim: syscall.Timespec{Sec: defaultTime.Unix() + 42<<1}}}, true)
 	if !compareProperties(p, map[string]interface{}{
-		"name": "some",
-		"size": int64(42),
-		"modTime": defaultTime.Unix(),
-		"isDir": false,
-		"mode": os.ModePerm,
+		"name":       "some",
+		"size":       int64(42),
+		"modTime":    defaultTime.Unix(),
+		"isDir":      false,
+		"mode":       os.ModePerm,
 		"modeString": fmt.Sprint(os.ModePerm),
-		"user": u.Username,
-		"group": g,
+		"user":       u.Username,
+		"group":      g,
 		"accessTime": defaultTime.Unix() + 42,
 		"changeTime": defaultTime.Unix() + 42<<1}) {
 		t.Fail()
@@ -1973,7 +1973,8 @@ func TestGetDirRoot(t *testing.T) {
 			}
 			switch n {
 			case "some0", "some1", "some2":
-				if !convert64(m, "modTime") || !convert64(m, "size") {
+				if !convert64(m, "modTime") || !convert64(m, "size") ||
+					!convert64(m, "accessTime") || !convert64(m, "changeTime") {
 					t.Fail()
 				}
 				if n == "some1" && !convertFm(m) {
@@ -2536,25 +2537,14 @@ func TestDeletef(t *testing.T) {
 	dir := path.Join(dn, "delete")
 	removeIfExistsF(t, dir)
 	ensureDirF(t, dir)
-
-	// no permission
 	dir0 := path.Join(dir, "dir0")
 	ensureDirF(t, dir0)
 	file0 := path.Join(dir0, "file0")
 	withNewFileF(t, file0, nil)
-	err := os.Chmod(dir0, 0500)
-	errFatal(t, err)
-	htreq(t, "DELETE", s.URL + "/delete/dir0/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
-	err = os.Chmod(dir0, 0700)
-	errFatal(t, err)
 
 	// doesn't exist
 	removeIfExistsF(t, file0)
-	htreq(t, "DELETE", s.URL + "/delete/dir0/file0", nil, func(rsp *http.Response) {
+	htreq(t, "DELETE", s.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2562,7 +2552,7 @@ func TestDeletef(t *testing.T) {
 
 	// exists, deleted
 	withNewFileF(t, file0, nil)
-	htreq(t, "DELETE", s.URL + "/delete/dir0/file0", nil, func(rsp *http.Response) {
+	htreq(t, "DELETE", s.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2572,7 +2562,75 @@ func TestDeletef(t *testing.T) {
 	})
 }
 
-func TestFileMkdir(t *testing.T) {
+func TestDeletefNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		deletef(w, r)
+	}
+	dir := path.Join(dn, "delete")
+	removeIfExistsF(t, dir)
+	ensureDirF(t, dir)
+
+	// no permission
+	dir0 := path.Join(dir, "dir0")
+	ensureDirF(t, dir0)
+	file0 := path.Join(dir0, "file0")
+	withNewFileF(t, file0, nil)
+	err := os.Chmod(dir0, 0500)
+	errFatal(t, err)
+	htreq(t, "DELETE", s.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+	err = os.Chmod(dir0, 0700)
+	errFatal(t, err)
+}
+
+func TestMkdirf(t *testing.T) {
+	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
+		mkdirf(w, r)
+	}
+	dir := path.Join(dn, "mkdir")
+	removeIfExistsF(t, dir)
+	ensureDirF(t, dir)
+	dir0 := path.Join(dir, "dir0")
+	ensureDirF(t, dir0)
+
+	// doesn't exist, created
+	dir1 := path.Join(dir0, "dir1")
+	removeIfExistsF(t, dir1)
+	htreq(t, "MKDIR", s.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(dir1); err != nil {
+			t.Fail()
+		}
+	})
+
+	// exists, not touched
+	ensureDirF(t, dir1)
+	file0 := path.Join(dir1, "file0")
+	withNewFileF(t, file0, nil)
+	htreq(t, "MKDIR", s.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+		if _, err := os.Lstat(file0); err != nil {
+			t.Fail()
+		}
+	})
+}
+
+func TestMkdirfNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
 		mkdirf(w, r)
 	}
@@ -2586,7 +2644,7 @@ func TestFileMkdir(t *testing.T) {
 	err := os.Chmod(dir0, 0500)
 	errFatal(t, err)
 	dir1 := path.Join(dir0, "dir1")
-	htreq(t, "MKDIR", s.URL + "/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+	htreq(t, "MKDIR", s.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2596,30 +2654,6 @@ func TestFileMkdir(t *testing.T) {
 	})
 	err = os.Chmod(dir0, 0700)
 	errFatal(t, err)
-
-	// doesn't exist, created
-	removeIfExistsF(t, dir1)
-	htreq(t, "MKDIR", s.URL + "/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(dir1); err != nil {
-			t.Fail()
-		}
-	})
-
-	// exists, not touched
-	ensureDirF(t, dir1)
-	file0 := path.Join(dir1, "file0")
-	withNewFileF(t, file0, nil)
-	htreq(t, "MKDIR", s.URL + "/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(file0); err != nil {
-			t.Fail()
-		}
-	})
 }
 
 func TestNoCmd(t *testing.T) {
@@ -2893,14 +2927,14 @@ func TestPost(t *testing.T) {
 	thnd.sh = handler
 
 	// invalid query
-	htreq(t, "POST", s.URL + "?%%", nil, func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"?%%", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// invalid command
-	htreq(t, "POST", s.URL + "?cmd=invalid", nil, func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2920,7 +2954,7 @@ func TestPost(t *testing.T) {
 	props := toPropertyMap(fi, false)
 	props["mode"] = 0660
 	js, err := json.Marshal(props)
-	htreq(t, "POST", s.URL + "/post/file?cmd=modprops", bytes.NewBuffer(js), func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"/post/file?cmd=modprops", bytes.NewBuffer(js), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2933,7 +2967,7 @@ func TestPost(t *testing.T) {
 
 	// delete
 	withNewFileF(t, file, nil)
-	htreq(t, "POST", s.URL + "/post/file?cmd=delete", nil, func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"/post/file?cmd=delete", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2946,7 +2980,7 @@ func TestPost(t *testing.T) {
 	// mkdir
 	dir0 := path.Join(dir, "dir0")
 	removeIfExistsF(t, dir0)
-	htreq(t, "POST", s.URL + "/post/dir0?cmd=mkdir", nil, func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"/post/dir0?cmd=mkdir", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2959,7 +2993,7 @@ func TestPost(t *testing.T) {
 	withNewFileF(t, file, nil)
 	file0 := path.Join(dir, "file0")
 	removeIfExistsF(t, file0)
-	htreq(t, "POST", s.URL + "/post/file?cmd=copy&to=/post/file0", nil, func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"/post/file?cmd=copy&to=/post/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2971,7 +3005,7 @@ func TestPost(t *testing.T) {
 	// rename
 	withNewFileF(t, file, nil)
 	removeIfExistsF(t, file0)
-	htreq(t, "POST", s.URL + "/post/file?cmd=rename&to=/post/file0", nil, func(rsp *http.Response) {
+	htreq(t, "POST", s.URL+"/post/file?cmd=rename&to=/post/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
