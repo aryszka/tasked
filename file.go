@@ -500,6 +500,7 @@ func modpropsf(w http.ResponseWriter, r *http.Request) {
 	for k, v := range m {
 		switch k {
 		case "mode":
+			// todo: first check if round number
 			fv, ok := v.(float64)
 			if !checkBadReq(w, ok) {
 				return
@@ -508,6 +509,7 @@ func modpropsf(w http.ResponseWriter, r *http.Request) {
 			if !checkOsError(w, err) {
 				return
 			}
+			// todo:
 			// case "owner":
 			// case "group"
 		}

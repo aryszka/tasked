@@ -57,7 +57,9 @@ var (
 )
 
 func init() {
+	initTestdir()
 	dn = path.Join(testdir, "http")
+	trace(testdir)
 	err := ensureDir(dn)
 	if err != nil {
 		panic(err)
@@ -1532,8 +1534,6 @@ func TestPropsf(t *testing.T) {
 			t.Fail()
 		}
 		if !compareProperties(pr, prVerify) {
-			t.Log(pr)
-			t.Log(prVerify)
 			t.Fail()
 		}
 	})
@@ -1572,6 +1572,7 @@ func TestPropsfRoot(t *testing.T) {
 	err = os.Chmod(dn, 0777)
 	errFatal(t, err)
 	fn := "some-file-uid"
+	trace(dn)
 	p := path.Join(dn, fn)
 	url := s.URL + "/" + fn
 	withNewFileF(t, p, nil)

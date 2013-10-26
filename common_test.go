@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path"
 	"testing"
 	"time"
 )
@@ -123,6 +124,92 @@ func TestDoRetryReport(t *testing.T) {
 	})
 	<-done
 	if c != 2 || len(errs) != 2 {
+		t.Fail()
+	}
+}
+
+func TestAbspath(t *testing.T) {
+	wd, err := os.Getwd()
+	errFatal(t, err)
+	p, err := abspath("/", "")
+	if err != nil || p != "/" {
+		t.Fail()
+	}
+	p, err = abspath("/some/path", "")
+	if err != nil || p != "/some/path" {
+		t.Fail()
+	}
+	p, err = abspath("", "")
+	if err != nil || p != wd {
+		t.Fail()
+	}
+	p, err = abspath("some", "")
+	if err != nil || p != path.Join(wd, "some") {
+		t.Fail()
+	}
+	p, err = abspath("some/path", "")
+	if err != nil || p != path.Join(wd, "some/path") {
+		t.Fail()
+	}
+	p, err = abspath("some/path", "not/absolute")
+	if err == nil {
+		t.Fail()
+	}
+	p, err = abspath("some/path", "/absolute/path")
+	if p != "/absolute/path/some/path" || err != nil {
+		t.Fail()
+	}
+}
+
+func TestEnsureDir(t *testing.T) {
+	const syserr = "Cannot create test file."
+
+	// exists and directory
+	tp := path.Join(testdir, "some")
+	err := os.RemoveAll(tp)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = os.MkdirAll(tp, os.ModePerm)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = ensureDir(tp)
+	if err != nil {
+		t.Fail()
+	}
+
+	// exists and not directory
+	err = os.RemoveAll(tp)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	var f *os.File
+	f, err = os.Create(tp)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	f.Close()
+	err = ensureDir(tp)
+	if err == nil {
+		t.Fail()
+	}
+
+	// doesn't exist
+	err = os.RemoveAll(tp)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	err = ensureDir(tp)
+	if err != nil {
+		t.Fail()
+	}
+	var fi os.FileInfo
+	fi, err = os.Stat(tp)
+	if err != nil {
+		t.Fatal(syserr)
+	}
+	if !fi.IsDir() {
 		t.Fail()
 	}
 }

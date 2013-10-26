@@ -9,87 +9,43 @@ import (
 	"testing"
 )
 
-const (
-	failedToInitTestdir = "Failed to initialize test directory."
-)
-
 var (
 	testTokenValidity    = 1200
 	testMaxSearchResults = 30
 )
 
-// duplicate
-func init() {
-	get := func() string {
-		td := os.Getenv(testdirKey)
-		if len(td) > 0 {
-			return td
-		}
-		td = os.Getenv("GOPATH")
-		if len(td) > 0 {
-			return path.Join(td, defaultTestdir)
-		}
-		td = os.Getenv("HOME")
-		if len(td) > 0 {
-			return path.Join(td, defaultTestdir)
-		}
-		td, err := os.Getwd()
-		if err != nil {
-			panic(failedToInitTestdir)
-		}
-		return path.Join(td, defaultTestdir)
+func TestCheckPath(t *testing.T) {
+	p := path.Join(testdir, "test-file")
+	removeIfExistsF(t, p)
+	ok, err := checkPath(p)
+	if ok || err != nil {
+		t.Fail()
 	}
-	testdir = get()
-	err := ensureDir(testdir)
-	if err != nil {
-		panic(failedToInitTestdir)
+	withNewFileF(t, p, nil)
+	ok, err = checkPath(p)
+	if !ok || err != nil {
+		t.Fail()
 	}
 }
 
-func TestGetConfdir(t *testing.T) {
-	const configTestdir = "config-test"
-	err := withEnv(configEnvKey, configTestdir, func() error {
-		dir, err := getConfdir()
-		if err != nil {
-			return err
-		}
-		if dir != configTestdir {
-			return errors.New("Failed.")
-		}
-		return nil
-	})
-	if err != nil {
+func TestCheckPathNotRoot(t *testing.T) {
+	if isRoot {
+		t.Skip()
+	}
+
+	dir := path.Join(testdir, "dir")
+	ensureDirF(t, dir)
+	p := path.Join(dir, "test-file")
+	withNewFileF(t, p, nil)
+	err := os.Chmod(dir, 0)
+	defer func() {
+		err = os.Chmod(dir, os.ModePerm)
+		errFatal(t, err)
+	}()
+	ok, err := checkPath(p)
+	if ok || err == nil {
 		t.Fail()
 	}
-	err = withEnv(configEnvKey, "", func() error {
-		dir, err := getConfdir()
-		if err != nil {
-			return err
-		}
-		if dir != path.Join(os.Getenv("HOME"), configDefaultDir) {
-			return errors.New("Failed.")
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fail()
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal()
-	}
-	err = withEnv(configEnvKey, "", func() error {
-		return withEnv("HOME", "", func() error {
-			dir, err := getConfdir()
-			if err != nil {
-				return err
-			}
-			if dir != path.Join(wd, configDefaultDir) {
-				return errors.New("Failed.")
-			}
-			return nil
-		})
-	})
 }
 
 func TestEvalFile(t *testing.T) {
@@ -98,14 +54,14 @@ func TestEvalFile(t *testing.T) {
 	errFatal(t, err)
 	p := path.Join(testdir, "some")
 
-	err = evalFile("", nil)
+	err = evalFile("", "", nil)
 	if err != nil {
 		t.Fail()
 	}
 
 	err = removeIfExists(p)
 	errFatal(t, err)
-	err = evalFile(p, nil)
+	err = evalFile(p, "", nil)
 	if err == nil {
 		t.Fail()
 	}
@@ -116,7 +72,12 @@ func TestEvalFile(t *testing.T) {
 	})
 	errFatal(t, err)
 	var b []byte
-	err = evalFile(p, &b)
+	err = evalFile(p, "", &b)
+	if err != nil || !bytes.Equal(b, []byte("some")) {
+		t.Fail()
+	}
+
+	err = evalFile(path.Base(p), path.Dir(p), &b)
 	if err != nil || !bytes.Equal(b, []byte("some")) {
 		t.Fail()
 	}
@@ -163,7 +124,8 @@ func TestReadConfig(t *testing.T) {
 			bytes.Equal(left.http.tls.key, right.http.tls.key) &&
 			bytes.Equal(left.http.tls.cert, right.http.tls.cert) &&
 			left.http.address == right.http.address &&
-			left.files.search.maxResults == right.files.search.maxResults
+			left.files.search.maxResults == right.files.search.maxResults &&
+			left.files.root == right.files.root
 	}
 
 	fn := path.Join(testdir, configTestDir)
@@ -171,7 +133,7 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(syserr)
 	}
-	fn = path.Join(fn, configBaseName)
+	fn = path.Join(fn, ".tasked")
 
 	// settings file doesn't exist
 	err = os.RemoveAll(fn)
@@ -262,21 +224,22 @@ func TestReadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(syserr)
 	}
+	print := func(f *os.File, ft string, args ...interface{}) bool {
+		_, err := fmt.Fprintf(f, ft, args...)
+		return err == nil
+	}
 	err = withNewFile(fn, func(f *os.File) error {
-		print := func(ft string, args ...interface{}) bool {
-			_, err := fmt.Fprintf(f, ft, args...)
-			return err == nil
-		}
-		if !(print("[Sec]\n") &&
-			print("aeskeypath = %s\n", aesKeypath) &&
-			print("aesivpath = %s\n", aesIvpath) &&
-			print("tokenvaliditysecs = %d\n", testTokenValidity) &&
-			print("[Http]\n") &&
-			print("tlskeypath = %s\n", tlsKeypath) &&
-			print("tlscertpath = %s\n", tlsCertpath) &&
-			print("address = %s\n", ":9091") &&
-			print("[Files]\n") &&
-			print("maxsearchresults = %d\n", testMaxSearchResults)) {
+		if !(print(f, "[Sec]\n") &&
+			print(f, "aeskeypath = %s\n", aesKeypath) &&
+			print(f, "aesivpath = %s\n", aesIvpath) &&
+			print(f, "tokenvaliditysecs = %d\n", testTokenValidity) &&
+			print(f, "[Http]\n") &&
+			print(f, "tlskeypath = %s\n", tlsKeypath) &&
+			print(f, "tlscertpath = %s\n", tlsCertpath) &&
+			print(f, "address = %s\n", ":9091") &&
+			print(f, "[Files]\n") &&
+			print(f, "maxsearchresults = %d\n", testMaxSearchResults) &&
+			print(f, "root = %s", testdir)) {
 			return errors.New(syserr)
 		}
 		return nil
@@ -306,6 +269,24 @@ func TestReadConfig(t *testing.T) {
 	if cfg.http.address != ":9091" {
 		t.Fail()
 	}
+	if cfg.files.root != testdir {
+		t.Fail()
+	}
+	if cfg.files.search.maxResults != testMaxSearchResults {
+		t.Fail()
+	}
+
+	// relative path
+	withNewFileF(t, fn, func(f *os.File) error {
+		if !(print(f, "[files]\n") && print(f, "root = %s", "some/path")) {
+			return errors.New(syserr)
+		}
+		return nil
+	})
+	err = readConfig(fn)
+	if err != nil || cfg.files.root != path.Join(path.Dir(fn), "some/path") {
+		t.Fail()
+	}
 
 	// settings file exists with invalid content
 	err = os.RemoveAll(fn)
@@ -328,12 +309,13 @@ func TestReadConfig(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
+	p := path.Join(testdir, "config-test")
 	os.Setenv(configEnvKey, testdir)
-	err := os.RemoveAll(path.Join(testdir, configBaseName))
+	err := os.RemoveAll(p)
 	if err != nil {
 		t.Fatal("Cannot cleanup test data.")
 	}
-	err = initConfig()
+	err = initConfig(p)
 	if err != nil {
 		t.Fail()
 	}

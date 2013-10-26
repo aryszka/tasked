@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"path"
 	"time"
 )
 
@@ -25,4 +28,30 @@ func doretlog(do func() error, delay time.Duration) {
 
 func doretlog42(do func() error) {
 	doretlog(do, 42*time.Millisecond)
+}
+
+func abspath(p, dir string) (string, error) {
+	if path.IsAbs(p) {
+		return p, nil
+	}
+	if len(dir) == 0 {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return "", err
+		}
+	} else if !path.IsAbs(dir) {
+		return "", fmt.Errorf("Not an absolute path: %s.", dir)
+	}
+	return path.Join(dir, p), nil
+}
+
+func ensureDir(dir string) error {
+	fi, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		err = os.MkdirAll(dir, os.ModePerm)
+	} else if err == nil && !fi.IsDir() {
+		err = fmt.Errorf("File exists and not a directory: %s.", dir)
+	}
+	return err
 }

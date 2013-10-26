@@ -9,39 +9,40 @@ import (
 	"path"
 )
 
-const (
-	defaultTestdir = "test"
-	testdirKey     = "testdir"
-)
+var authFailed = errors.New("Authentication failed.")
 
-func getHttpDir() string {
-	dn := os.Getenv(testdirKey)
-	if len(dn) == 0 {
-		dn = os.Getenv("HOME")
-		if len(dn) == 0 {
-			var err error
-			dn, err = os.Getwd()
-			if err != nil {
-				panic(err)
-			}
-		}
-		dn = path.Join(dn, defaultTestdir)
+func getConfigPath() (string, error) {
+	p := flags.config
+	if len(p) > 0 {
+		return abspath(p, "")
 	}
-	return dn
+	p = os.Getenv(configEnvKey)
+	if len(p) > 0 {
+		return abspath(p, "")
+	}
+	p = path.Join(os.Getenv("HOME"), defaultConfigBaseName)
+	if ok, err := checkPath(p); ok || err != nil {
+		return p, err
+	}
+	if ok, err := checkPath(sysConfig); ok || err != nil {
+		return sysConfig, err
+	}
+	return "", nil
 }
 
-func ensureDir(dir string) error {
-	fi, err := os.Stat(dir)
-	if os.IsNotExist(err) {
-		err = os.MkdirAll(dir, os.ModePerm)
-	} else if err == nil && !fi.IsDir() {
-		err = errors.New("File exists and not a directory.")
+func getHttpDir() (string, error) {
+	dn := flags.root
+	if len(dn) > 0 {
+		return abspath(dn, "")
 	}
-	return err
+	dn = cfg.files.root
+	if len(dn) > 0 {
+		return dn, nil
+	}
+	return os.Getwd()
 }
 
 func authPam(user, pwd string) error {
-	fail := func() error { return errors.New("Authentication failed.") }
 	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
 		switch style {
 		case pam.PROMPT_ECHO_OFF, pam.PROMPT_ECHO_ON:
@@ -51,19 +52,26 @@ func authPam(user, pwd string) error {
 		}
 	}))
 	if s != pam.SUCCESS {
-		return fail()
+		return authFailed
 	}
 	defer t.End(s)
 
 	s = t.Authenticate(0)
 	if s != pam.SUCCESS {
-		return fail()
+		return authFailed
 	}
 	return nil
 }
 
 func main() {
-	err := initConfig()
+	parseFlags()
+
+	configPath, err := getConfigPath()
+	if err != nil {
+		log.Panicln(err)
+	}
+
+	err = initConfig(configPath)
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -73,7 +81,10 @@ func main() {
 		log.Panicln(err)
 	}
 
-	dn := getHttpDir()
+	dn, err = getHttpDir()
+	if err != nil {
+		log.Panicln(err)
+	}
 	ensureDir(dn)
 
 	err = serve()

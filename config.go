@@ -8,10 +8,12 @@ import (
 )
 
 const (
-	configDefaultDir = ".tasked"
-	configEnvKey     = "taskedconf"
-	configBaseName   = "settings"
+	defaultConfigBaseName = ".tasked"
+	configEnvKey          = "taskedconf"
+	defaultSysConfig      = "/etc/tasked/settings"
 )
+
+var sysConfig = defaultSysConfig
 
 type ReadConf struct {
 	Sec struct {
@@ -25,6 +27,7 @@ type ReadConf struct {
 		Address     string
 	}
 	Files struct {
+		Root             string
 		MaxSearchResults int
 	}
 }
@@ -45,6 +48,7 @@ type config struct {
 		address string
 	}
 	files struct {
+		root   string
 		search struct {
 			maxResults int
 		}
@@ -57,27 +61,23 @@ func (c *config) TokenValidity() int { return c.sec.tokenValidity }
 
 var cfg config
 
-func getConfdir() (string, error) {
-	dir := os.Getenv(configEnvKey)
-	if len(dir) > 0 {
-		return dir, nil
+func checkPath(p string) (bool, error) {
+	_, err := os.Lstat(p)
+	if os.IsNotExist(err) {
+		return false, nil
 	}
-	dir = os.Getenv("HOME")
-	if len(dir) == 0 {
-		var err error
-		dir, err = os.Getwd()
-		if err != nil {
-			return "", err
-		}
-	}
-	return path.Join(dir, configDefaultDir), nil
+	return err == nil, err
 }
 
-func evalFile(path string, val *[]byte) error {
-	if len(path) == 0 {
+func evalFile(p, dir string, val *[]byte) error {
+	if len(p) == 0 {
 		return nil
 	}
-	c, err := ioutil.ReadFile(path)
+	p, err := abspath(p, dir)
+	if err != nil {
+		return err
+	}
+	c, err := ioutil.ReadFile(p)
 	if err != nil {
 		return err
 	}
@@ -106,33 +106,39 @@ func readConfig(fn string) error {
 		return err
 	}
 
-	if err = evalFile(rcfg.Sec.AesKeyPath, &cfg.sec.aes.key); err != nil {
+	dir := path.Dir(fn)
+
+	if err = evalFile(rcfg.Sec.AesKeyPath, dir, &cfg.sec.aes.key); err != nil {
 		return err
 	}
-	if err = evalFile(rcfg.Sec.AesIvPath, &cfg.sec.aes.iv); err != nil {
+	if err = evalFile(rcfg.Sec.AesIvPath, dir, &cfg.sec.aes.iv); err != nil {
 		return err
 	}
 	evalIntP(rcfg.Sec.TokenValiditySecs, &cfg.sec.tokenValidity)
 
-	if err = evalFile(rcfg.Http.TlsKeyPath, &cfg.http.tls.key); err != nil {
+	if err = evalFile(rcfg.Http.TlsKeyPath, dir, &cfg.http.tls.key); err != nil {
 		return err
 	}
-	if err = evalFile(rcfg.Http.TlsCertPath, &cfg.http.tls.cert); err != nil {
+	if err = evalFile(rcfg.Http.TlsCertPath, dir, &cfg.http.tls.cert); err != nil {
 		return err
 	}
 	evalString(rcfg.Http.Address, &cfg.http.address)
 
 	evalIntP(rcfg.Files.MaxSearchResults, &cfg.files.search.maxResults)
 
+	evalString(rcfg.Files.Root, &cfg.files.root)
+	if len(cfg.files.root) > 0 {
+		cfg.files.root, err = abspath(cfg.files.root, dir)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func initConfig() error {
-	cfgdir, err := getConfdir()
-	if err != nil {
-		return err
-	}
-	err = readConfig(path.Join(cfgdir, configBaseName))
+func initConfig(p string) error {
+	err := readConfig(p)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}

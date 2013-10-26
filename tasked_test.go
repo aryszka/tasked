@@ -3,13 +3,18 @@ package main
 import (
 	"crypto/aes"
 	"crypto/rand"
-	"errors"
 	"flag"
 	"io"
 	"os"
 	"os/user"
 	"path"
 	"testing"
+)
+
+const (
+	defaultTestdir      = "test"
+	testdirKey          = "testdir"
+	failedToInitTestdir = "Failed to initialize test directory."
 )
 
 var (
@@ -23,12 +28,10 @@ var (
 	getDirRoot   bool
 )
 
-func init() {
-	usr, err := user.Current()
-	if err != nil {
-		panic(err)
+func initTestdir() {
+	if testdir != defaultTestdir {
+		return
 	}
-	isRoot = usr.Uid == "0"
 	testdir = func() string {
 		td := os.Getenv(testdirKey)
 		if len(td) > 0 {
@@ -48,10 +51,21 @@ func init() {
 		}
 		return path.Join(td, defaultTestdir)
 	}()
-	err = ensureDir(testdir)
+	trace(testdir)
+	err := ensureDir(testdir)
 	if err != nil {
 		panic(failedToInitTestdir)
 	}
+}
+
+func init() {
+	usr, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	isRoot = usr.Uid == "0"
+
+	initTestdir()
 
 	tp := flag.Bool("test.pam", false, "")
 	tpr := flag.Bool("test.propsroot", false, "")
@@ -85,94 +99,123 @@ func makeRandom(l int) []byte {
 
 func makeKey() []byte { return makeRandom(aes.BlockSize) }
 
-func TestEnsureDir(t *testing.T) {
-	const syserr = "Cannot create test file."
+func TestGetConfigPath(t *testing.T) {
+	wd, err := os.Getwd()
+	errFatal(t, err)
+	confSys := sysConfig
+	defer func() { sysConfig = confSys }()
+	hp := path.Join(os.Getenv("HOME"), defaultConfigBaseName)
+	hpBak := hp + ".test.bak"
+	err = os.Rename(hp, hpBak)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	defer func() {
+		removeIfExistsF(t, hp)
+		err = os.Rename(hpBak, hp)
+		if os.IsNotExist(err) {
+			return
+		}
+		errFatal(t, err)
+	}()
+	confEnv := os.Getenv(configEnvKey)
+	defer func() {
+		err = os.Setenv(configEnvKey, confEnv)
+		errFatal(t, err)
+	}()
+	confFlag := flags.config
+	defer func() { flags.config = confFlag }()
 
-	// exists and directory
-	tp := path.Join(testdir, "some")
-	err := os.RemoveAll(tp)
-	if err != nil {
-		t.Fatal(syserr)
+	// none
+	flags.config = ""
+	err = os.Setenv(configEnvKey, "")
+	errFatal(t, err)
+	removeIfExistsF(t, hp)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal()
 	}
-	err = os.MkdirAll(tp, os.ModePerm)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	err = ensureDir(tp)
-	if err != nil {
+	sysConfig = path.Join(testdir, "noexist")
+	removeIfExistsF(t, sysConfig)
+	p, err := getConfigPath()
+	if p != "" || err != nil {
 		t.Fail()
 	}
 
-	// exists and not directory
-	err = os.RemoveAll(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	var f *os.File
-	f, err = os.Create(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	f.Close()
-	err = ensureDir(tp)
-	if err == nil {
+	// sys
+	withNewFileF(t, sysConfig, nil)
+	p, err = getConfigPath()
+	if p != sysConfig || err != nil {
 		t.Fail()
 	}
 
-	// doesn't exist
-	err = os.RemoveAll(tp)
-	if err != nil {
-		t.Fatal(syserr)
-	}
-	err = ensureDir(tp)
-	if err != nil {
+	// home
+	withNewFileF(t, hp, nil)
+	p, err = getConfigPath()
+	if p != hp || err != nil {
 		t.Fail()
 	}
-	var fi os.FileInfo
-	fi, err = os.Stat(tp)
-	if err != nil {
-		t.Fatal(syserr)
+
+	// env
+	err = os.Setenv(configEnvKey, "env/path")
+	errFatal(t, err)
+	p, err = getConfigPath()
+	if p != path.Join(wd, "env/path") || err != nil {
+		t.Fail()
 	}
-	if !fi.IsDir() {
+	err = os.Setenv(configEnvKey, "/env/path")
+	errFatal(t, err)
+	p, err = getConfigPath()
+	if p != "/env/path" || err != nil {
+		t.Fail()
+	}
+
+	// flag
+	flags.config = "flag/path"
+	p, err = getConfigPath()
+	if p != path.Join(wd, "flag/path") || err != nil {
+		t.Fail()
+	}
+	flags.config = "/flag/path"
+	p, err = getConfigPath()
+	if p != "/flag/path" || err != nil {
 		t.Fail()
 	}
 }
 
 func TestGetHttpDir(t *testing.T) {
-	err := withEnv(testdirKey, "", func() error {
-		return withEnv("HOME", "", func() error {
-			dn := getHttpDir()
-			wd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			if dn != path.Join(wd, defaultTestdir) {
-				return errors.New(dn)
-			}
-			return nil
-		})
-	})
-	if err != nil {
+	wd, err := os.Getwd()
+	errFatal(t, err)
+	rootCfg := cfg.files.root
+	defer func() { cfg.files.root = rootCfg }()
+	rootFlag := flags.root
+	defer func() { flags.root = rootFlag }()
+
+	// none
+	flags.root = ""
+	cfg.files.root = ""
+	dn, err := getHttpDir()
+	if err != nil || dn != wd {
 		t.Fail()
 	}
-	err = withEnv(testdirKey, "", func() error {
-		dn := getHttpDir()
-		if dn != path.Join(os.Getenv("HOME"), defaultTestdir) {
-			return errors.New(dn)
-		}
-		return nil
-	})
-	if err != nil {
+
+	// config
+	cfg.files.root = "/cfg/path"
+	dn, err = getHttpDir()
+	if err != nil || dn != "/cfg/path" {
+		t.Log(err)
+		t.Log(dn)
 		t.Fail()
 	}
-	err = withEnv(testdirKey, "test", func() error {
-		dn := getHttpDir()
-		if dn != "test" {
-			return errors.New(dn)
-		}
-		return nil
-	})
-	if err != nil {
+
+	// flag
+	flags.root = "flag/path"
+	dn, err = getHttpDir()
+	if err != nil || dn != path.Join(wd, "flag/path") {
+		t.Fail()
+	}
+	flags.root = "/flag/path"
+	dn, err = getHttpDir()
+	if err != nil || dn != "/flag/path" {
 		t.Fail()
 	}
 }
