@@ -200,7 +200,11 @@ func compareProperties(left, right map[string]interface{}) bool {
 		!compareInt64("modTime") ||
 		!compareBool("isDir") ||
 		!compareString("modeString") ||
-		!compareFileMode("mode") {
+		!compareFileMode("mode") ||
+		!compareString("user") ||
+		!compareString("group") ||
+		!compareInt64("accessTime") ||
+		!compareInt64("changeTime") {
 		return false
 	}
 	return true
@@ -342,6 +346,37 @@ func TestToPropertyMap(t *testing.T) {
 		"mode":       os.ModePerm,
 		"modeString": fmt.Sprint(os.ModePerm),
 		"dirname":    "/"}) {
+		t.Fail()
+	}
+	u, err := user.Current()
+	errFatal(t, err)
+	uid, err := strconv.Atoi(u.Uid)
+	gid, err := strconv.Atoi(u.Gid)
+	errFatal(t, err)
+	g, err := lookupGroupName(uint32(gid))
+	errFatal(t, err)
+	p = toPropertyMap(&fileInfoT{
+		name: "some",
+		size: 42,
+		modTime: defaultTime,
+		isDir: false,
+		mode: os.ModePerm,
+		sys: &syscall.Stat_t{
+			Uid: uint32(uid),
+			Gid: uint32(gid),
+			Atim: syscall.Timespec{Sec: defaultTime.Unix() + 42},
+			Ctim: syscall.Timespec{Sec: defaultTime.Unix() + 42<<1}}}, true)
+	if !compareProperties(p, map[string]interface{}{
+		"name": "some",
+		"size": int64(42),
+		"modTime": defaultTime.Unix(),
+		"isDir": false,
+		"mode": os.ModePerm,
+		"modeString": fmt.Sprint(os.ModePerm),
+		"user": u.Username,
+		"group": g,
+		"accessTime": defaultTime.Unix() + 42,
+		"changeTime": defaultTime.Unix() + 42<<1}) {
 		t.Fail()
 	}
 }
@@ -1235,10 +1270,10 @@ func TestGetQryExpression(t *testing.T) {
 	}
 }
 
-func TestFileSearch(t *testing.T) {
+func TestSearchf(t *testing.T) {
 	var queryString url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileSearch(w, r, queryString)
+		searchf(w, r, queryString)
 	}
 
 	p := path.Join(dn, "search")
@@ -1386,14 +1421,14 @@ func TestFileSearch(t *testing.T) {
 	})
 }
 
-func TestFileSearchNotRoot(t *testing.T) {
+func TestSearchfNotRoot(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
 
 	var queryString url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileSearch(w, r, queryString)
+		searchf(w, r, queryString)
 	}
 
 	p := path.Join(dn, "search")
@@ -1444,9 +1479,9 @@ func TestFileSearchNotRoot(t *testing.T) {
 	checkLen(0)
 }
 
-func TestFileProps(t *testing.T) {
+func TestPropsf(t *testing.T) {
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileProps(w, r)
+		propsf(w, r)
 	}
 
 	fn := "some-file"
@@ -1491,10 +1526,14 @@ func TestFileProps(t *testing.T) {
 		var pr map[string]interface{}
 		err = json.Unmarshal(js, &pr)
 		errFatal(t, err)
-		if !convert64(pr, "modTime") || !convert64(pr, "size") || !convertFm(pr) {
+		if !convert64(pr, "modTime") || !convert64(pr, "size") ||
+			!convert64(pr, "accessTime") || !convert64(pr, "changeTime") ||
+			!convertFm(pr) {
 			t.Fail()
 		}
 		if !compareProperties(pr, prVerify) {
+			t.Log(pr)
+			t.Log(prVerify)
 			t.Fail()
 		}
 	})
@@ -1518,7 +1557,7 @@ func TestFileProps(t *testing.T) {
 	})
 }
 
-func TestFilePropsRoot(t *testing.T) {
+func TestPropsfRoot(t *testing.T) {
 	// Tests using Setuid cannot be run together until they're replaced by Seteuid
 	if !isRoot || !propsRoot {
 		t.Skip()
@@ -1537,7 +1576,7 @@ func TestFilePropsRoot(t *testing.T) {
 	url := s.URL + "/" + fn
 	withNewFileF(t, p, nil)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileProps(w, r)
+		propsf(w, r)
 	}
 
 	// uid := syscall.Getuid()
@@ -1601,12 +1640,12 @@ func TestFilePropsRoot(t *testing.T) {
 	})
 }
 
-func TestFileModprops(t *testing.T) {
+func TestModpropsf(t *testing.T) {
 	fn := "some-file"
 	p := path.Join(dn, fn)
 	withNewFileF(t, p, nil)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileModprops(w, r)
+		modpropsf(w, r)
 	}
 	mrb := maxRequestBody
 	defer func() { maxRequestBody = mrb }()
@@ -1693,7 +1732,7 @@ func TestFileModprops(t *testing.T) {
 		})
 }
 
-func TestFileModpropsRoot(t *testing.T) {
+func TestModpropsfRoot(t *testing.T) {
 	// Tests using Setuid cannot be run together until they're replaced by Seteuid
 	if !isRoot || !modpropsRoot {
 		t.Skip()
@@ -1710,7 +1749,7 @@ func TestFileModpropsRoot(t *testing.T) {
 	err := os.Chmod(p, os.ModePerm)
 	errFatal(t, err)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileModprops(w, r)
+		modpropsf(w, r)
 	}
 
 	// uid := syscall.Getuid()
@@ -1821,7 +1860,9 @@ func TestGetDir(t *testing.T) {
 			}
 			switch n {
 			case "some0", "some1", "some2":
-				if !convert64(m, "modTime") || !convert64(m, "size") || !convertFm(m) {
+				if !convert64(m, "modTime") || !convert64(m, "size") ||
+					!convert64(m, "accessTime") || !convert64(m, "changeTime") ||
+					!convertFm(m) {
 					t.Fail()
 				}
 				fi, err := os.Stat(path.Join(p, n))
@@ -2061,9 +2102,9 @@ func TestGetFile(t *testing.T) {
 	errFatal(t, err)
 }
 
-func TestFilePut(t *testing.T) {
+func TestPutf(t *testing.T) {
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		filePut(w, r)
+		putf(w, r)
 	}
 
 	// invalid path
@@ -2170,13 +2211,13 @@ func TestFilePut(t *testing.T) {
 	})
 }
 
-func TestFilePutNotRoot(t *testing.T) {
+func TestPutfNotRoot(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
 
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		filePut(w, r)
+		putf(w, r)
 	}
 
 	// no permission to write dir
@@ -2219,14 +2260,14 @@ func TestFilePutNotRoot(t *testing.T) {
 	})
 }
 
-func TestFileCopyRename(t *testing.T) {
+func TestCopyRename(t *testing.T) {
 	var (
 		multiple bool
 		qry      url.Values
 		f        = func(_, _ string) error { return nil }
 	)
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileCopyRename(multiple, f)(w, r, qry)
+		copyRename(multiple, f)(w, r, qry)
 	}
 
 	// no to
@@ -2294,10 +2335,10 @@ func TestFileCopyRename(t *testing.T) {
 	})
 }
 
-func TestFileCopy(t *testing.T) {
+func TestCopyf(t *testing.T) {
 	var qry url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileCopy(w, r, qry)
+		copyf(w, r, qry)
 	}
 
 	dir := path.Join(dn, "copy")
@@ -2361,10 +2402,10 @@ func TestFileCopy(t *testing.T) {
 	})
 }
 
-func TestFileRename(t *testing.T) {
+func TestRenamef(t *testing.T) {
 	var qry url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileRename(w, r, qry)
+		renamef(w, r, qry)
 	}
 
 	dir := path.Join(dn, "rename")
@@ -2423,14 +2464,14 @@ func TestFileRename(t *testing.T) {
 	})
 }
 
-func TestFileRenameNotRoot(t *testing.T) {
+func TestRenamefNotRoot(t *testing.T) {
 	if isRoot {
 		t.Skip()
 	}
 
 	var qry url.Values
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileRename(w, r, qry)
+		renamef(w, r, qry)
 	}
 
 	dir := path.Join(dn, "rename")
@@ -2488,9 +2529,9 @@ func TestFileRenameNotRoot(t *testing.T) {
 	errFatal(t, err)
 }
 
-func TestFileDelete(t *testing.T) {
+func TestDeletef(t *testing.T) {
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileDelete(w, r)
+		deletef(w, r)
 	}
 	dir := path.Join(dn, "delete")
 	removeIfExistsF(t, dir)
@@ -2533,7 +2574,7 @@ func TestFileDelete(t *testing.T) {
 
 func TestFileMkdir(t *testing.T) {
 	thnd.sh = func(w http.ResponseWriter, r *http.Request) {
-		fileMkdir(w, r)
+		mkdirf(w, r)
 	}
 	dir := path.Join(dn, "mkdir")
 	removeIfExistsF(t, dir)

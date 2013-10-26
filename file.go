@@ -98,8 +98,16 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 		mm := replaceMode(0, fi.Mode())
 		m["modeString"] = fmt.Sprint(mm)
 		m["mode"] = mm
-		// missing:
-		// - owner, group, accessTime, changeTime
+		if sstat, ok := fi.Sys().(*syscall.Stat_t); ok {
+			if owner, err := user.LookupId(strconv.Itoa(int(sstat.Uid))); err == nil {
+				m["user"] = owner.Username
+			}
+			if gn, err := lookupGroupName(sstat.Gid); err == nil {
+				m["group"] = gn
+			}
+			m["accessTime"] = sstat.Atim.Sec
+			m["changeTime"] = sstat.Ctim.Sec
+		}
 	}
 	if fii, ok := fi.(*fileInfo); ok {
 		m["dirname"] = fii.dirname
@@ -372,7 +380,7 @@ func getQryExpression(qry url.Values, key string) (*regexp.Regexp, error) {
 	return regexp.Compile(expr)
 }
 
-func fileSearch(w http.ResponseWriter, r *http.Request, qry url.Values) {
+func searchf(w http.ResponseWriter, r *http.Request, qry url.Values) {
 	p, err := getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
@@ -434,12 +442,12 @@ func fileSearch(w http.ResponseWriter, r *http.Request, qry url.Values) {
 	checkServerError(w, err != marshalError)
 }
 
-func fileProps(w http.ResponseWriter, r *http.Request) {
+func propsf(w http.ResponseWriter, r *http.Request) {
 	p, err := getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
-	fi, err := os.Stat(p)
+	fi, err := os.Lstat(p)
 	if !checkOsError(w, err) {
 		return
 	}
@@ -456,7 +464,7 @@ func fileProps(w http.ResponseWriter, r *http.Request) {
 	checkServerError(w, err != marshalError)
 }
 
-func fileModprops(w http.ResponseWriter, r *http.Request) {
+func modpropsf(w http.ResponseWriter, r *http.Request) {
 	mr := &maxReader{reader: r.Body, count: maxRequestBody}
 	b, err := ioutil.ReadAll(mr)
 	if !checkHandle(w, err == io.EOF || mr.count > 0, http.StatusRequestEntityTooLarge) ||
@@ -475,7 +483,7 @@ func fileModprops(w http.ResponseWriter, r *http.Request) {
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
-	fi, err := os.Stat(p)
+	fi, err := os.Lstat(p)
 	if !checkOsError(w, err) {
 		return
 	}
@@ -542,7 +550,7 @@ func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo)
 	io.Copy(w, f)
 }
 
-func filePut(w http.ResponseWriter, r *http.Request) {
+func putf(w http.ResponseWriter, r *http.Request) {
 	p, err := getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
@@ -566,7 +574,7 @@ func filePut(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func fileCopyRename(multi bool, f func(string, string) error) queryHandler {
+func copyRename(multi bool, f func(string, string) error) queryHandler {
 	return func(w http.ResponseWriter, r *http.Request, qry url.Values) {
 		tos, ok := qry[copyRenameToKey]
 		if !checkBadReq(w, ok && (multi || len(tos) == 1)) {
@@ -591,11 +599,11 @@ func fileCopyRename(multi bool, f func(string, string) error) queryHandler {
 }
 
 var (
-	fileCopy   = fileCopyRename(true, copyTree)
-	fileRename = fileCopyRename(false, os.Rename)
+	copyf   = copyRename(true, copyTree)
+	renamef = copyRename(false, os.Rename)
 )
 
-func fileDelete(w http.ResponseWriter, r *http.Request) {
+func deletef(w http.ResponseWriter, r *http.Request) {
 	p, err := getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
@@ -607,7 +615,7 @@ func fileDelete(w http.ResponseWriter, r *http.Request) {
 	checkOsError(w, err)
 }
 
-func fileMkdir(w http.ResponseWriter, r *http.Request) {
+func mkdirf(w http.ResponseWriter, r *http.Request) {
 	p, err := getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
@@ -641,14 +649,14 @@ func queryNoCmd(f queryHandler) http.HandlerFunc {
 
 var (
 	options  = noCmd(func(_ http.ResponseWriter, _ *http.Request) {})
-	props    = noCmd(fileProps)
-	modprops = noCmd(fileModprops)
-	put      = noCmd(filePut)
-	delete   = noCmd(fileDelete)
-	mkdir    = noCmd(fileMkdir)
-	search   = queryNoCmd(fileSearch)
-	copy     = queryNoCmd(fileCopy)
-	rename   = queryNoCmd(fileRename)
+	props    = noCmd(propsf)
+	modprops = noCmd(modpropsf)
+	put      = noCmd(putf)
+	delete   = noCmd(deletef)
+	mkdir    = noCmd(mkdirf)
+	search   = queryNoCmd(searchf)
+	copy     = queryNoCmd(copyf)
+	rename   = queryNoCmd(renamef)
 )
 
 const (
@@ -672,9 +680,9 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	switch cmd {
 	case cmdProps:
-		fileProps(w, r)
+		propsf(w, r)
 	case cmdSearch:
-		fileSearch(w, r, qry)
+		searchf(w, r, qry)
 	default:
 		p, err := getPath(r.URL.Path)
 		if !checkHandle(w, err == nil, http.StatusNotFound) {
@@ -709,17 +717,17 @@ func post(w http.ResponseWriter, r *http.Request) {
 	}
 	switch cmd {
 	case cmdModprops:
-		fileModprops(w, r)
+		modpropsf(w, r)
 	case cmdDelete:
-		fileDelete(w, r)
+		deletef(w, r)
 	case cmdMkdir:
-		fileMkdir(w, r)
+		mkdirf(w, r)
 	case cmdCopy:
-		fileCopy(w, r, qry)
+		copyf(w, r, qry)
 	case cmdRename:
-		fileRename(w, r, qry)
+		renamef(w, r, qry)
 	default:
-		filePut(w, r)
+		putf(w, r)
 	}
 }
 
@@ -743,6 +751,5 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusMethodNotAllowed)
 		return
 	}
-	// handle any expectation header with 417 here
 	h(w, r)
 }

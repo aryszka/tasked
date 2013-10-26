@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// Tries executing a function. If it fails, retries after a delay but in a new
-// goroutine. If it fails again, reports (e.g. to log) both errors.
 func doretrep(do func() error, delay time.Duration, report func(...interface{})) {
 	err0 := do()
 	if err0 == nil {
@@ -21,12 +19,10 @@ func doretrep(do func() error, delay time.Duration, report func(...interface{}))
 	}()
 }
 
-// The same as doretrep, but with log.Println as report.
 func doretlog(do func() error, delay time.Duration) {
 	doretrep(do, delay, log.Println)
 }
 
-// The same as doretlog, but with 42 milliseconds as delay.
 func doretlog42(do func() error) {
 	doretlog(do, 42*time.Millisecond)
 }
