@@ -8,19 +8,16 @@ import (
 )
 
 const (
-	configDefaultDir = ".tasked"    // default directory name for tasked config if environment not set
-	configEnvKey     = "taskedconf" // environment variable of the tasked config directory path
-	configBaseName   = "settings"   // filename of storing general settings inside the config directory
+	configDefaultDir = ".tasked"
+	configEnvKey     = "taskedconf"
+	configBaseName   = "settings"
 )
 
-// Structure used to parse the general settings from an ini file.
-// TODO:
-// - replace the serialization with parsing from/serializing to a simple map
 type ReadConf struct {
 	Sec struct {
-		AesKeyPath        string // path to the file containing the aes key (no line break at the end)
-		AesIvPath         string // path to the file containing the aes iv (no line break at the end)
-		TokenValiditySecs int    // seconds of validity of the authentication token
+		AesKeyPath        string
+		AesIvPath         string
+		TokenValiditySecs int
 	}
 	Http struct {
 		TlsKeyPath  string
@@ -32,7 +29,6 @@ type ReadConf struct {
 	}
 }
 
-// Structure holding application settings.
 type config struct {
 	sec struct {
 		aes struct {
@@ -59,11 +55,8 @@ func (c *config) AesKey() []byte     { return c.sec.aes.key }
 func (c *config) AesIv() []byte      { return c.sec.aes.iv }
 func (c *config) TokenValidity() int { return c.sec.tokenValidity }
 
-// Current settings available for the whole package.
 var cfg config
 
-// Gets the configuration directory specified by the taskedconf environment key.
-// If the environment variable is empty, $HOME/.tasked or $(pwd)/.tasked is used.
 func getConfdir() (string, error) {
 	dir := os.Getenv(configEnvKey)
 	if len(dir) > 0 {
@@ -106,7 +99,6 @@ func evalString(inval string, val *string) {
 	*val = inval
 }
 
-// Reads the specified configuration file into cfg.
 func readConfig(fn string) error {
 	rcfg := &ReadConf{}
 	err := gcfg.ReadFileInto(rcfg, fn)
@@ -135,7 +127,6 @@ func readConfig(fn string) error {
 	return nil
 }
 
-// Initializes the configuration.
 func initConfig() error {
 	cfgdir, err := getConfdir()
 	if err != nil {

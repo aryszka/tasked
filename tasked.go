@@ -1,6 +1,3 @@
-// Tasked is not yet defined.
-//
-// It uses PAM (Pluggable Authentication Module) to check user credentials.
 package main
 
 import (
@@ -18,8 +15,6 @@ const (
 )
 
 func getHttpDir() string {
-	// todo: in the final logic, wd probably will need to be before home, and home used only if wd is not
-	// writeable, or rather not used at all
 	dn := os.Getenv(testdirKey)
 	if len(dn) == 0 {
 		dn = os.Getenv("HOME")
@@ -35,7 +30,6 @@ func getHttpDir() string {
 	return dn
 }
 
-// Makes sure that a directory with a given path exists.
 func ensureDir(dir string) error {
 	fi, err := os.Stat(dir)
 	if os.IsNotExist(err) {

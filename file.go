@@ -23,13 +23,13 @@ import (
 const (
 	jsonContentType         = "application/json; charset=utf-8"
 	defaultMaxRequestBody   = 1 << 30               // todo: make this configurable
-	modeMask                = os.FileMode(1)<<9 - 1 // the least significant 9 bits
+	modeMask                = os.FileMode(1)<<9 - 1
 	defaultMaxSearchResults = 30
 	searchQueryMax          = "max"
 	searchQueryName         = "name"
 	searchQueryContent      = "content"
 	copyRenameToKey         = "to"
-	cmdKey                  = "cmd"   // querystring key for method replacement commands
+	cmdKey                  = "cmd"
 )
 
 type fileInfo struct {
@@ -64,7 +64,7 @@ func (mr *maxReader) Read(b []byte) (n int, err error) {
 type queryHandler func(http.ResponseWriter, *http.Request, url.Values)
 
 var (
-	dn                  string // directory opened for HTTP
+	dn                  string
 	headerContentType          = http.CanonicalHeaderKey("content-type")
 	headerContentLength        = http.CanonicalHeaderKey("content-length")
 	maxRequestBody      int64  = defaultMaxRequestBody
@@ -125,8 +125,6 @@ func pathIntersect(p0, p1 string) int {
 	return res
 }
 
-// Writes an error response with a specific status code
-// and with the default status text for that code.
 func errorResponse(w http.ResponseWriter, s int) {
 	http.Error(w, http.StatusText(s), s)
 }
@@ -142,10 +140,6 @@ func handleErrno(w http.ResponseWriter, errno syscall.Errno) {
 	}
 }
 
-// Writes an error response according to the given error.
-// If the error is permission related, it uses 404 Not Found,
-// but the response header will contain: 'Www-Authenticate: tasked.'
-// (Only useful when the error cause is directly rooted in the request.)
 func checkOsError(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return true
@@ -267,7 +261,6 @@ func detectContentType(name string, f *os.File) (ct string, err error) {
 	return
 }
 
-// Executes breadth first file search with a limit on the number of the results.
 func searchFiles(dirs []*fileInfo, max int, qry func(fi *fileInfo) bool) []*fileInfo {
 	if max <= 0 || len(dirs) == 0 {
 		return nil
@@ -535,7 +528,6 @@ func getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
 }
 
 func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
-	// here a couple of seek/read errors may appear
 	ct, err := detectContentType(fi.Name(), f)
 	if !checkServerError(w, err == nil) {
 		return
@@ -660,7 +652,7 @@ var (
 )
 
 const (
-	cmdProps  = "props" // command replacing the PROPS method
+	cmdProps  = "props"
 	cmdSearch = "search"
 	cmdModprops = "modprops"
 	cmdDelete = "delete"
@@ -731,7 +723,6 @@ func post(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// mapping from HTTP methods to functions
 var reqmap = map[string]func(http.ResponseWriter, *http.Request){
 	"OPTIONS":  options,
 	"HEAD":     get,
@@ -746,19 +737,6 @@ var reqmap = map[string]func(http.ResponseWriter, *http.Request){
 	"MKDIR":    mkdir,
 	"POST":     post}
 
-// Serves a directory for manipulating its content.
-// HTTP method OPTIONS can be used as no-op ping-pong.
-//
-// On GET, returns the content of the served file or 404 Not found.
-// On PUT, saves the request body as the content of the served file.
-// On DELETE, deletes the served file. If the file doesn't exist, it
-// doesn't do anything, and returns 200 OK.
-// If the running process doesn't have permissions for the requested
-// operation, it returns 401 Unauthorized.
-// POST can be used instead of PUT.
-// If the HTTP method is not GET, PUT or POST, then it returns 405
-// Method Not Allowed.
-// For any unexpected, returns 500 Internal Server Error.
 func handler(w http.ResponseWriter, r *http.Request) {
 	h := reqmap[r.Method]
 	if h == nil {

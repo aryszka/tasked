@@ -1,4 +1,3 @@
-// Package app runs the http server.
 package main
 
 import (
@@ -10,8 +9,6 @@ import (
 
 const noTlsWarning = "TLS has not been configured."
 
-// Reads and evaluates the http related configuration from cfg.
-// If a value is not defined, falls back to defaults.
 func getHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	tlsKey = []byte(defaultTlsKey)
 	tlsCert = []byte(defaultTlsCert)
@@ -34,7 +31,6 @@ func getHttpConfig() (tlsKey, tlsCert []byte, address string) {
 	return tlsKey, tlsCert, address
 }
 
-// Starts a TLS wrapped TCP listener.
 func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	l, err := net.Listen("tcp", address)
 	if err != nil {
@@ -51,9 +47,6 @@ func listen(tlsKey, tlsCert []byte, address string) (net.Listener, error) {
 	return l, nil
 }
 
-// Starts an HTTP server with the configured settings.
-// Within the config, TLS certification and key must be provided. (The hardcoded default serves only testing
-// purpose.)
 func serve() error {
 	l, err := listen(getHttpConfig())
 	if err != nil {
