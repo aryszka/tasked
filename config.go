@@ -61,14 +61,6 @@ func (c *config) TokenValidity() int { return c.sec.tokenValidity }
 
 var cfg config
 
-func checkPath(p string) (bool, error) {
-	_, err := os.Lstat(p)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
 func evalFile(p, dir string, val *[]byte) error {
 	if len(p) == 0 {
 		return nil

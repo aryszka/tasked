@@ -14,40 +14,6 @@ var (
 	testMaxSearchResults = 30
 )
 
-func TestCheckPath(t *testing.T) {
-	p := path.Join(testdir, "test-file")
-	removeIfExistsF(t, p)
-	ok, err := checkPath(p)
-	if ok || err != nil {
-		t.Fail()
-	}
-	withNewFileF(t, p, nil)
-	ok, err = checkPath(p)
-	if !ok || err != nil {
-		t.Fail()
-	}
-}
-
-func TestCheckPathNotRoot(t *testing.T) {
-	if isRoot {
-		t.Skip()
-	}
-
-	dir := path.Join(testdir, "dir")
-	ensureDirF(t, dir)
-	p := path.Join(dir, "test-file")
-	withNewFileF(t, p, nil)
-	err := os.Chmod(dir, 0)
-	defer func() {
-		err = os.Chmod(dir, os.ModePerm)
-		errFatal(t, err)
-	}()
-	ok, err := checkPath(p)
-	if ok || err == nil {
-		t.Fail()
-	}
-}
-
 func TestEvalFile(t *testing.T) {
 	dir := path.Join(testdir, "config")
 	err := ensureDir(dir)

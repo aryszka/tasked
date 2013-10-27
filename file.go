@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"net/url"
@@ -96,14 +95,13 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 		"isDir":   fi.IsDir()}
 	if ext {
 		mm := replaceMode(0, fi.Mode())
-		m["modeString"] = fmt.Sprint(mm)
 		m["mode"] = mm
 		if sstat, ok := fi.Sys().(*syscall.Stat_t); ok {
-			if owner, err := user.LookupId(strconv.Itoa(int(sstat.Uid))); err == nil {
+			if owner, err := user.LookupId(strconv.FormatUint(uint64(sstat.Uid), 10)); err == nil {
 				m["user"] = owner.Username
 			}
-			if gn, err := lookupGroupName(sstat.Gid); err == nil {
-				m["group"] = gn
+			if grp, err := lookupGroupById(sstat.Gid); err == nil {
+				m["group"] = grp.name
 			}
 			m["accessTime"] = sstat.Atim.Sec
 			m["changeTime"] = sstat.Ctim.Sec
@@ -234,7 +232,7 @@ func isOwner(u *user.User, fi os.FileInfo) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	return strconv.Itoa(int(sstat.Uid)) == u.Uid, nil
+	return strconv.FormatUint(uint64(sstat.Uid), 10) == u.Uid, nil
 }
 
 func writeJsonResponse(w http.ResponseWriter, r *http.Request, d interface{}) (int, error) {
@@ -466,15 +464,48 @@ func propsf(w http.ResponseWriter, r *http.Request) {
 
 func modpropsf(w http.ResponseWriter, r *http.Request) {
 	mr := &maxReader{reader: r.Body, count: maxRequestBody}
-	b, err := ioutil.ReadAll(mr)
+	dec := json.NewDecoder(mr)
+	dec.UseNumber()
+	var m map[string]interface{}
+	err := dec.Decode(&m)
 	if !checkHandle(w, err == io.EOF || mr.count > 0, http.StatusRequestEntityTooLarge) ||
-		!checkServerError(w, err == nil) {
+		!checkBadReq(w, err == io.EOF || err == nil) {
 		return
 	}
-	var m map[string]interface{}
-	if len(b) > 0 {
-		err = json.Unmarshal(b, &m)
-		if !checkBadReq(w, err == nil) {
+	buf := dec.Buffered()
+	n, _ := buf.Read(make([]byte, 1))
+	if !checkBadReq(w, n == 0) {
+		return
+	}
+
+	mode := int64(-1)
+	owner := ""
+	group := ""
+	for k, v := range m {
+		switch k {
+		case "mode":
+			n, ok := v.(json.Number)
+			if !checkBadReq(w, ok) {
+				return
+			}
+			mode, err = n.Int64()
+			if !checkBadReq(w, err == nil && mode >= 0) {
+				return
+			}
+		case "owner":
+			var ok bool
+			owner, ok = v.(string)
+			if !checkBadReq(w, ok) {
+				return
+			}
+		case "group":
+			var ok bool
+			group, ok = v.(string)
+			if !checkBadReq(w, ok) {
+				return
+			}
+		default:
+			errorResponse(w, http.StatusBadRequest)
 			return
 		}
 	}
@@ -497,21 +528,55 @@ func modpropsf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for k, v := range m {
-		switch k {
-		case "mode":
-			// todo: first check if round number
-			fv, ok := v.(float64)
-			if !checkBadReq(w, ok) {
+	var (
+		uid *uint32
+		gid *uint32
+	)
+	if len(owner) > 0 {
+		usr, err := user.Lookup(owner)
+		if !checkHandle(w, err == nil, http.StatusNotFound) {
+			return
+		}
+		puid, err := strconv.ParseUint(usr.Uid, 10, 32)
+		if !checkHandle(w, err == nil, http.StatusNotFound) {
+			return
+		}
+		upuid := uint32(puid)
+		uid = &upuid
+	}
+	if len(group) > 0 {
+		grp, err := lookupGroupByName(group)
+		if !checkHandle(w, err == nil, http.StatusNotFound) {
+			return
+		}
+		gid = &grp.id
+	}
+
+	if mode >= 0 {
+		rmode := replaceMode(fi.Mode(), os.FileMode(mode))
+		if rmode != fi.Mode() {
+			err := os.Chmod(p, rmode)
+			if !checkHandle(w, err == nil, http.StatusNotFound) {
 				return
 			}
-			err := os.Chmod(p, replaceMode(fi.Mode(), os.FileMode(fv)))
-			if !checkOsError(w, err) {
+		}
+	}
+	if uid != nil || gid != nil {
+		sstat, ok := fi.Sys().(*syscall.Stat_t)
+		if !checkHandle(w, ok, http.StatusNotFound) {
+			return
+		}
+		if uid == nil {
+			uid = &sstat.Uid
+		}
+		if gid == nil {
+			gid = &sstat.Gid
+		}
+		if *uid != sstat.Uid || *gid != sstat.Gid {
+			err = os.Chown(p, int(*uid), int(*gid))
+			if !checkHandle(w, err == nil, http.StatusNotFound) {
 				return
 			}
-			// todo:
-			// case "owner":
-			// case "group"
 		}
 	}
 }

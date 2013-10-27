@@ -21,10 +21,10 @@ func getConfigPath() (string, error) {
 		return abspath(p, "")
 	}
 	p = path.Join(os.Getenv("HOME"), defaultConfigBaseName)
-	if ok, err := checkPath(p); ok || err != nil {
+	if ok, err := checkPath(p, false); ok || err != nil {
 		return p, err
 	}
-	if ok, err := checkPath(sysConfig); ok || err != nil {
+	if ok, err := checkPath(sysConfig, false); ok || err != nil {
 		return sysConfig, err
 	}
 	return "", nil

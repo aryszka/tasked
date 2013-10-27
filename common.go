@@ -55,3 +55,14 @@ func ensureDir(dir string) error {
 	}
 	return err
 }
+
+func checkPath(p string, dir bool) (bool, error) {
+	fi, err := os.Lstat(p)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return err == nil && (fi.IsDir() && dir || !fi.IsDir() && !dir), err
+}
