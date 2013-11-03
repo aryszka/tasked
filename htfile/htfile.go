@@ -1,7 +1,8 @@
-package main
+package htfile
 
 import (
 	"bufio"
+	"code.google.com/p/tasked/util"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +22,7 @@ import (
 
 const (
 	jsonContentType         = "application/json; charset=utf-8"
-	defaultMaxRequestBody   = 1 << 30 // todo: make this configurable
+	defaultMaxRequestBody   = 1 << 30
 	modeMask                = os.FileMode(1)<<9 - 1
 	defaultMaxSearchResults = 30
 	searchQueryMax          = "max"
@@ -29,6 +30,13 @@ const (
 	searchQueryContent      = "content"
 	copyRenameToKey         = "to"
 	cmdKey                  = "cmd"
+	cmdProps                = "props"
+	cmdSearch               = "search"
+	cmdModprops             = "modprops"
+	cmdDelete               = "delete"
+	cmdMkdir                = "mkdir"
+	cmdCopy                 = "copy"
+	cmdRename               = "rename"
 )
 
 type fileInfo struct {
@@ -62,11 +70,20 @@ func (mr *maxReader) Read(b []byte) (n int, err error) {
 
 type queryHandler func(http.ResponseWriter, *http.Request, url.Values)
 
+type Handler struct {
+	dn               string
+	maxRequestBody   int64
+	maxSearchResults int
+}
+
+type Settings interface {
+	MaxRequestBody() int64
+	MaxSearchResults() int
+}
+
 var (
-	dn                  string
 	headerContentType         = http.CanonicalHeaderKey("content-type")
 	headerContentLength       = http.CanonicalHeaderKey("content-length")
-	maxRequestBody      int64 = defaultMaxRequestBody
 	marshalError        error = errors.New("Marshaling error.")
 
 	textMimeTypes = map[string]string{
@@ -78,10 +95,6 @@ var (
 		"txt16l": "text/plain; charset=utf-16le",
 		"txt16b": "text/plain; charset=utf-16be"}
 )
-
-func init() {
-	syscall.Umask(0077)
-}
 
 func replaceMode(n, m os.FileMode) os.FileMode {
 	return n&^modeMask | m&modeMask
@@ -100,8 +113,8 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 			if owner, err := user.LookupId(strconv.FormatUint(uint64(sstat.Uid), 10)); err == nil {
 				m["user"] = owner.Username
 			}
-			if grp, err := lookupGroupById(sstat.Gid); err == nil {
-				m["group"] = grp.name
+			if grp, err := util.LookupGroupById(sstat.Gid); err == nil {
+				m["group"] = grp.Name
 			}
 			m["accessTime"] = sstat.Atim.Sec
 			m["changeTime"] = sstat.Ctim.Sec
@@ -279,7 +292,7 @@ func searchFiles(dirs []*fileInfo, max int, qry func(fi *fileInfo) bool) []*file
 		if err != nil {
 			return
 		}
-		defer doretlog42(d.Close)
+		defer util.Doretlog42(d.Close)
 		fis, err := d.Readdir(0)
 		if err != nil {
 			return
@@ -313,7 +326,7 @@ func copyTree(from, to string) error {
 	if err != nil {
 		return err
 	}
-	defer doretlog42(ff.Close)
+	defer util.Doretlog42(ff.Close)
 	if fi.IsDir() {
 		err = os.Mkdir(to, os.ModePerm)
 		if err != nil {
@@ -334,22 +347,13 @@ func copyTree(from, to string) error {
 		if err != nil {
 			return err
 		}
-		defer doretlog42(tf.Close)
+		defer util.Doretlog42(tf.Close)
 		_, err = io.Copy(tf, ff)
 		if err != nil {
 			return err
 		}
 	}
 	return os.Chmod(to, fi.Mode())
-}
-
-func getPath(sp string) (string, error) {
-	p := path.Join(dn, sp)
-	i := pathIntersect(dn, p)
-	if i < 2 {
-		return "", errors.New("Invalid path.")
-	}
-	return p, nil
 }
 
 func getQryNum(qry url.Values, key string) (int, error) {
@@ -378,8 +382,17 @@ func getQryExpression(qry url.Values, key string) (*regexp.Regexp, error) {
 	return regexp.Compile(expr)
 }
 
-func searchf(w http.ResponseWriter, r *http.Request, qry url.Values) {
-	p, err := getPath(r.URL.Path)
+func (h *Handler) getPath(sp string) (string, error) {
+	p := path.Join(h.dn, sp)
+	i := pathIntersect(h.dn, p)
+	if i < 2 {
+		return "", errors.New("Invalid path.")
+	}
+	return p, nil
+}
+
+func (h *Handler) search(w http.ResponseWriter, r *http.Request, qry url.Values) {
+	p, err := h.getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
@@ -387,8 +400,8 @@ func searchf(w http.ResponseWriter, r *http.Request, qry url.Values) {
 	if !checkBadReq(w, err == nil) {
 		return
 	}
-	if max <= 0 || max > defaultMaxSearchResults {
-		max = defaultMaxSearchResults
+	if max <= 0 || max > h.maxSearchResults {
+		max = h.maxSearchResults
 	}
 	rxn, err := getQryExpression(qry, searchQueryName)
 	if !checkBadReq(w, err == nil) {
@@ -414,7 +427,7 @@ func searchf(w http.ResponseWriter, r *http.Request, qry url.Values) {
 			if err != nil {
 				return false
 			}
-			defer doretlog42(f.Close)
+			defer util.Doretlog42(f.Close)
 			ct, err := detectContentType(fi.Name(), f)
 			if err != nil {
 				return false
@@ -440,8 +453,8 @@ func searchf(w http.ResponseWriter, r *http.Request, qry url.Values) {
 	checkServerError(w, err != marshalError)
 }
 
-func propsf(w http.ResponseWriter, r *http.Request) {
-	p, err := getPath(r.URL.Path)
+func (h *Handler) props(w http.ResponseWriter, r *http.Request) {
+	p, err := h.getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
@@ -462,8 +475,8 @@ func propsf(w http.ResponseWriter, r *http.Request) {
 	checkServerError(w, err != marshalError)
 }
 
-func modpropsf(w http.ResponseWriter, r *http.Request) {
-	mr := &maxReader{reader: r.Body, count: maxRequestBody}
+func (h *Handler) modprops(w http.ResponseWriter, r *http.Request) {
+	mr := &maxReader{reader: r.Body, count: h.maxRequestBody}
 	dec := json.NewDecoder(mr)
 	dec.UseNumber()
 	var m map[string]interface{}
@@ -510,7 +523,7 @@ func modpropsf(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	p, err := getPath(r.URL.Path)
+	p, err := h.getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
@@ -545,11 +558,11 @@ func modpropsf(w http.ResponseWriter, r *http.Request) {
 		uid = &upuid
 	}
 	if len(group) > 0 {
-		grp, err := lookupGroupByName(group)
+		grp, err := util.LookupGroupByName(group)
 		if !checkHandle(w, err == nil, http.StatusNotFound) {
 			return
 		}
-		gid = &grp.id
+		gid = &grp.Id
 	}
 
 	if mode >= 0 {
@@ -581,7 +594,7 @@ func modpropsf(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
+func (h *Handler) getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
 	dfis, err := d.Readdir(0)
 	if !checkOsError(w, err) {
 		return
@@ -602,14 +615,14 @@ func getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
 	checkServerError(w, err != marshalError)
 }
 
-func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
+func (h *Handler) getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
 	ct, err := detectContentType(fi.Name(), f)
 	if !checkServerError(w, err == nil) {
 		return
 	}
-	h := w.Header()
-	h.Set(headerContentType, ct)
-	h.Set(headerContentLength, fmt.Sprintf("%d", fi.Size()))
+	header := w.Header()
+	header.Set(headerContentType, ct)
+	header.Set(headerContentLength, fmt.Sprintf("%d", fi.Size()))
 	if r.Method == "HEAD" {
 		return
 	}
@@ -617,8 +630,8 @@ func getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo)
 	io.Copy(w, f)
 }
 
-func putf(w http.ResponseWriter, r *http.Request) {
-	p, err := getPath(r.URL.Path)
+func (h *Handler) put(w http.ResponseWriter, r *http.Request) {
+	p, err := h.getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
@@ -630,48 +643,50 @@ func putf(w http.ResponseWriter, r *http.Request) {
 	if !checkOsError(w, err) {
 		return
 	}
-	defer doretlog42(f.Close)
+	defer util.Doretlog42(f.Close)
 	if !checkOsError(w, err) {
 		return
 	}
-	mr := &maxReader{reader: r.Body, count: maxRequestBody}
+	mr := &maxReader{reader: r.Body, count: h.maxRequestBody}
 	_, err = io.Copy(f, mr)
 	if checkHandle(w, err == io.EOF || mr.count > 0, http.StatusRequestEntityTooLarge) {
 		checkOsError(w, err)
 	}
 }
 
-func copyRename(multi bool, f func(string, string) error) queryHandler {
-	return func(w http.ResponseWriter, r *http.Request, qry url.Values) {
-		tos, ok := qry[copyRenameToKey]
-		if !checkBadReq(w, ok && (multi || len(tos) == 1)) {
+func (h *Handler) copyRename(w http.ResponseWriter, r *http.Request,
+	qry url.Values, multi bool, f func(string, string) error) {
+	tos, ok := qry[copyRenameToKey]
+	if !checkBadReq(w, ok && (multi || len(tos) == 1)) {
+		return
+	}
+	from, err := h.getPath(r.URL.Path)
+	if !checkHandle(w, err == nil, http.StatusNotFound) {
+		return
+	}
+	for _, to := range tos {
+		to, err := h.getPath(to)
+		if !checkHandle(w, err == nil, http.StatusNotFound) ||
+			!checkBadReq(w, pathIntersect(from, to) == 0) {
 			return
 		}
-		from, err := getPath(r.URL.Path)
-		if !checkHandle(w, err == nil, http.StatusNotFound) {
+		err = f(from, to)
+		if !checkOsError(w, err) {
 			return
-		}
-		for _, to := range tos {
-			to, err := getPath(to)
-			if !checkHandle(w, err == nil, http.StatusNotFound) ||
-				!checkBadReq(w, pathIntersect(from, to) == 0) {
-				return
-			}
-			err = f(from, to)
-			if !checkOsError(w, err) {
-				return
-			}
 		}
 	}
 }
 
-var (
-	copyf   = copyRename(true, copyTree)
-	renamef = copyRename(false, os.Rename)
-)
+func (h *Handler) copy(w http.ResponseWriter, r *http.Request, qry url.Values) {
+	h.copyRename(w, r, qry, true, copyTree)
+}
 
-func deletef(w http.ResponseWriter, r *http.Request) {
-	p, err := getPath(r.URL.Path)
+func (h *Handler) rename(w http.ResponseWriter, r *http.Request, qry url.Values) {
+	h.copyRename(w, r, qry, false, os.Rename)
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	p, err := h.getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
@@ -682,8 +697,8 @@ func deletef(w http.ResponseWriter, r *http.Request) {
 	checkOsError(w, err)
 }
 
-func mkdirf(w http.ResponseWriter, r *http.Request) {
-	p, err := getPath(r.URL.Path)
+func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request) {
+	p, err := h.getPath(r.URL.Path)
 	if !checkHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
@@ -691,52 +706,61 @@ func mkdirf(w http.ResponseWriter, r *http.Request) {
 	checkOsError(w, err)
 }
 
-func noCmd(f http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		_, ok := checkQryCmd(w, r)
-		if !ok {
-			return
-		}
+func noCmd(w http.ResponseWriter, r *http.Request, f http.HandlerFunc) {
+	_, ok := checkQryCmd(w, r)
+	if !ok {
+		return
+	}
+	if f != nil {
 		f(w, r)
 	}
 }
 
-func queryNoCmd(f queryHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		qry, err := url.ParseQuery(r.URL.RawQuery)
-		if !checkBadReq(w, err == nil) {
-			return
-		}
-		if _, ok := checkQryValuesCmd(w, qry); !ok {
-			return
-		}
+func queryNoCmd(w http.ResponseWriter, r *http.Request, f queryHandler) {
+	qry, err := url.ParseQuery(r.URL.RawQuery)
+	if !checkBadReq(w, err == nil) {
+		return
+	}
+	if _, ok := checkQryValuesCmd(w, qry); !ok {
+		return
+	}
+	if f != nil {
 		f(w, r, qry)
 	}
 }
 
-var (
-	options  = noCmd(func(_ http.ResponseWriter, _ *http.Request) {})
-	props    = noCmd(propsf)
-	modprops = noCmd(modpropsf)
-	put      = noCmd(putf)
-	delete   = noCmd(deletef)
-	mkdir    = noCmd(mkdirf)
-	search   = queryNoCmd(searchf)
-	copy     = queryNoCmd(copyf)
-	rename   = queryNoCmd(renamef)
-)
+func New(dir string, s Settings) *Handler {
+	h := &Handler{
+		dn:               dir,
+		maxRequestBody:   defaultMaxRequestBody,
+		maxSearchResults: defaultMaxSearchResults}
 
-const (
-	cmdProps    = "props"
-	cmdSearch   = "search"
-	cmdModprops = "modprops"
-	cmdDelete   = "delete"
-	cmdMkdir    = "mkdir"
-	cmdCopy     = "copy"
-	cmdRename   = "rename"
-)
+	if s == nil {
+		return h
+	}
+	mrb := s.MaxRequestBody()
+	if mrb > 0 {
+		h.maxRequestBody = mrb
+	}
+	msr := s.MaxSearchResults()
+	if msr > 0 {
+		h.maxSearchResults = msr
+	}
 
-func get(w http.ResponseWriter, r *http.Request) {
+	return h
+}
+
+func (h *Handler) Options(w http.ResponseWriter, r *http.Request)  { noCmd(w, r, nil) }
+func (h *Handler) Props(w http.ResponseWriter, r *http.Request)    { noCmd(w, r, h.props) }
+func (h *Handler) Modprops(w http.ResponseWriter, r *http.Request) { noCmd(w, r, h.modprops) }
+func (h *Handler) Put(w http.ResponseWriter, r *http.Request)      { noCmd(w, r, h.put) }
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request)   { noCmd(w, r, h.delete) }
+func (h *Handler) Mkdir(w http.ResponseWriter, r *http.Request)    { noCmd(w, r, h.mkdir) }
+func (h *Handler) Search(w http.ResponseWriter, r *http.Request)   { queryNoCmd(w, r, h.search) }
+func (h *Handler) Copy(w http.ResponseWriter, r *http.Request)     { queryNoCmd(w, r, h.copy) }
+func (h *Handler) Rename(w http.ResponseWriter, r *http.Request)   { queryNoCmd(w, r, h.rename) }
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	qry, err := url.ParseQuery(r.URL.RawQuery)
 	if !checkBadReq(w, err == nil) {
 		return
@@ -747,11 +771,11 @@ func get(w http.ResponseWriter, r *http.Request) {
 	}
 	switch cmd {
 	case cmdProps:
-		propsf(w, r)
+		h.props(w, r)
 	case cmdSearch:
-		searchf(w, r, qry)
+		h.search(w, r, qry)
 	default:
-		p, err := getPath(r.URL.Path)
+		p, err := h.getPath(r.URL.Path)
 		if !checkHandle(w, err == nil, http.StatusNotFound) {
 			return
 		}
@@ -759,21 +783,21 @@ func get(w http.ResponseWriter, r *http.Request) {
 		if !checkOsError(w, err) {
 			return
 		}
-		defer doretlog42(f.Close)
+		defer util.Doretlog42(f.Close)
 		fi, err := f.Stat()
 		if !checkOsError(w, err) {
 			return
 		}
 		if fi.IsDir() {
-			getDir(w, r, f)
+			h.getDir(w, r, f)
 			return
 
 		}
-		getFile(w, r, f, fi)
+		h.getFile(w, r, f, fi)
 	}
 }
 
-func post(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) Post(w http.ResponseWriter, r *http.Request) {
 	qry, err := url.ParseQuery(r.URL.RawQuery)
 	if !checkBadReq(w, err == nil) {
 		return
@@ -784,40 +808,48 @@ func post(w http.ResponseWriter, r *http.Request) {
 	}
 	switch cmd {
 	case cmdModprops:
-		modpropsf(w, r)
+		h.modprops(w, r)
 	case cmdDelete:
-		deletef(w, r)
+		h.delete(w, r)
 	case cmdMkdir:
-		mkdirf(w, r)
+		h.mkdir(w, r)
 	case cmdCopy:
-		copyf(w, r, qry)
+		h.copy(w, r, qry)
 	case cmdRename:
-		renamef(w, r, qry)
+		h.rename(w, r, qry)
 	default:
-		putf(w, r)
+		h.put(w, r)
 	}
 }
 
-var reqmap = map[string]func(http.ResponseWriter, *http.Request){
-	"OPTIONS":  options,
-	"HEAD":     get,
-	"SEARCH":   search,
-	"GET":      get,
-	"PROPS":    props,
-	"MODPROPS": modprops,
-	"PUT":      put,
-	"COPY":     copy,
-	"RENAME":   rename,
-	"DELETE":   delete,
-	"MKDIR":    mkdir,
-	"POST":     post}
-
-func handler(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// todo: document that the accept headers are simply ignored
-	h := reqmap[r.Method]
-	if h == nil {
+	switch r.Method {
+	case "OPTIONS":
+		h.Options(w, r)
+	case "HEAD":
+		h.Get(w, r)
+	case "SEARCH":
+		h.Search(w, r)
+	case "GET":
+		h.Get(w, r)
+	case "PROPS":
+		h.Props(w, r)
+	case "MODPROPS":
+		h.Modprops(w, r)
+	case "PUT":
+		h.Put(w, r)
+	case "COPY":
+		h.Copy(w, r)
+	case "RENAME":
+		h.Rename(w, r)
+	case "DELETE":
+		h.Delete(w, r)
+	case "MKDIR":
+		h.Mkdir(w, r)
+	case "POST":
+		h.Post(w, r)
+	default:
 		errorResponse(w, http.StatusMethodNotAllowed)
-		return
 	}
-	h(w, r)
 }

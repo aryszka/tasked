@@ -1,14 +1,21 @@
-package main
+package util
 
 import (
 	"fmt"
 	"log"
 	"os"
 	"path"
+	"syscall"
 	"time"
 )
 
-func doretrep(do func() error, delay time.Duration, report func(...interface{})) {
+const defaultTestdir = "test"
+
+func init() {
+	syscall.Umask(0077)
+}
+
+func Doretrep(do func() error, delay time.Duration, report func(...interface{})) {
 	err0 := do()
 	if err0 == nil {
 		return
@@ -22,31 +29,29 @@ func doretrep(do func() error, delay time.Duration, report func(...interface{}))
 	}()
 }
 
-func doretlog(do func() error, delay time.Duration) {
-	doretrep(do, delay, log.Println)
+func Doretlog(do func() error, delay time.Duration) {
+	Doretrep(do, delay, log.Println)
 }
 
-func doretlog42(do func() error) {
-	doretlog(do, 42*time.Millisecond)
+func Doretlog42(do func() error) {
+	Doretlog(do, 42*time.Millisecond)
 }
 
-func abspath(p, dir string) (string, error) {
+func Abspath(p, dir string) string {
 	if path.IsAbs(p) {
-		return p, nil
+		return p
 	}
-	if len(dir) == 0 {
-		var err error
-		dir, err = os.Getwd()
-		if err != nil {
-			return "", err
-		}
-	} else if !path.IsAbs(dir) {
-		return "", fmt.Errorf("Not an absolute path: %s.", dir)
-	}
-	return path.Join(dir, p), nil
+	return path.Join(dir, p)
 }
 
-func ensureDir(dir string) error {
+func AbspathNotEmpty(p, dir string) string {
+	if len(p) == 0 {
+		return p
+	}
+	return Abspath(p, dir)
+}
+
+func EnsureDir(dir string) error {
 	fi, err := os.Stat(dir)
 	if os.IsNotExist(err) {
 		err = os.MkdirAll(dir, os.ModePerm)
@@ -56,7 +61,7 @@ func ensureDir(dir string) error {
 	return err
 }
 
-func checkPath(p string, dir bool) (bool, error) {
+func CheckPath(p string, dir bool) (bool, error) {
 	fi, err := os.Lstat(p)
 	if os.IsNotExist(err) {
 		return false, nil

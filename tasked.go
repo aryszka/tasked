@@ -3,43 +3,56 @@ package main
 import (
 	"code.google.com/p/gopam"
 	"code.google.com/p/tasked/auth"
+	"code.google.com/p/tasked/htfile"
+	"code.google.com/p/tasked/util"
 	"errors"
+	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
-	"path"
 )
+
+type authSettings struct {
+	s      *settings
+	aesKey []byte
+	aesIv  []byte
+}
+
+func newAuthSettings(s *settings) (*authSettings, error) {
+	if s == nil {
+		s = &settings{}
+	}
+	as := &authSettings{}
+	as.s = s
+	if len(s.sec.aes.keyFile) > 0 {
+		b, err := ioutil.ReadFile(s.sec.aes.keyFile)
+		if err != nil {
+			return nil, err
+		}
+		as.aesKey = b
+	}
+	if len(s.sec.aes.ivFile) > 0 {
+		b, err := ioutil.ReadFile(s.sec.aes.ivFile)
+		if err != nil {
+			return nil, err
+		}
+		as.aesIv = b
+	}
+	return as, nil
+}
+
+func (as *authSettings) AesKey() []byte     { return as.aesKey }
+func (as *authSettings) AesIv() []byte      { return as.aesIv }
+func (as *authSettings) TokenValidity() int { return as.s.sec.tokenValidity }
 
 var authFailed = errors.New("Authentication failed.")
 
-func getConfigPath() (string, error) {
-	p := flags.config
-	if len(p) > 0 {
-		return abspath(p, "")
+func getHttpDir(s *settings) (string, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	p = os.Getenv(configEnvKey)
-	if len(p) > 0 {
-		return abspath(p, "")
-	}
-	p = path.Join(os.Getenv("HOME"), defaultConfigBaseName)
-	if ok, err := checkPath(p, false); ok || err != nil {
-		return p, err
-	}
-	if ok, err := checkPath(sysConfig, false); ok || err != nil {
-		return sysConfig, err
-	}
-	return "", nil
-}
-
-func getHttpDir() (string, error) {
-	dn := flags.root
-	if len(dn) > 0 {
-		return abspath(dn, "")
-	}
-	dn = cfg.files.root
-	if len(dn) > 0 {
-		return dn, nil
-	}
-	return os.Getwd()
+	return util.Abspath(s.files.root, wd), nil
 }
 
 func authPam(user, pwd string) error {
@@ -64,31 +77,32 @@ func authPam(user, pwd string) error {
 }
 
 func main() {
-	parseFlags()
+	s, err := getSettings()
+	if err != nil {
+		log.Panic(err)
+	}
 
-	configPath, err := getConfigPath()
+	as, err := newAuthSettings(s)
+	if err != nil {
+		log.Panic(err)
+	}
+	err = auth.Init(as, auth.AuthFunc(authPam))
+	if err != nil {
+		log.Panic(err)
+	}
+
+	dn, err := getHttpDir(s)
 	if err != nil {
 		log.Panicln(err)
 	}
+	util.EnsureDir(dn)
+	ht := htfile.New(dn, s)
 
-	err = initConfig(configPath)
+	l, err := listen(s)
 	if err != nil {
-		log.Panicln(err)
+		log.Panic(err)
 	}
+	defer util.Doretlog42(l.Close)
 
-	err = auth.Init(&cfg, auth.AuthFunc(authPam))
-	if err != nil {
-		log.Panicln(err)
-	}
-
-	dn, err = getHttpDir()
-	if err != nil {
-		log.Panicln(err)
-	}
-	ensureDir(dn)
-
-	err = serve()
-	if err != nil {
-		log.Panicln(err)
-	}
+	log.Panic(http.Serve(l, ht))
 }

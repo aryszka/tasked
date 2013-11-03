@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
-	"net"
+	"code.google.com/p/tasked/util"
+	"os"
+	"path"
 	"testing"
 )
 
@@ -45,76 +47,93 @@ ja5JCKq4V6B3O32gOEhgAdh6OUE4iWYxGhWd3wYUevdyFw==
 `
 )
 
-type httpTestConfig struct {
-	address string
-	tlsKey  []byte
-	tlsCert []byte
+func TestReadKey(t *testing.T) {
+	key, err := readKey("")
+	if err != nil || key != nil {
+		t.Fail()
+	}
+
+	tkey := []byte("1234567890123456")
+	p := path.Join(util.Testdir, "test-key")
+	util.WithNewFileF(t, p, func(f *os.File) error {
+		_, err := f.Write(tkey)
+		return err
+	})
+	key, err = readKey(p)
+	if err != nil || !bytes.Equal(key, tkey) {
+		t.Fail()
+	}
+
+	util.RemoveIfExistsF(t, p)
+	key, err = readKey(p)
+	if err != nil || key != nil {
+		t.Fail()
+	}
 }
 
-func (tc *httpTestConfig) Address() string { return tc.address }
-func (tc *httpTestConfig) TlsKey() []byte  { return tc.tlsKey }
-func (tc *httpTestConfig) TlsCert() []byte { return tc.tlsCert }
-
-func TestGetHttpConfig(t *testing.T) {
-	cfgOrig := cfg
-
-	// default
-	dtk, dtc := []byte(defaultTlsKey), []byte(defaultTlsCert)
-	cfg = config{}
-	tk, tc, a := getHttpConfig()
-	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
+func TestGetTcpSettings(t *testing.T) {
+	s := settings{}
+	key, cert, address, err := getTcpSettings(&s)
+	if err != nil ||
+		!bytes.Equal(key, []byte(defaultTlsKey)) ||
+		!bytes.Equal(cert, []byte(defaultTlsCert)) ||
+		address != defaultAddress {
 		t.Fail()
 	}
 
-	// set TLS key
-	vk, vc := []byte(testTlsKey), []byte(testTlsCert)
-	cfg.http.tls.key = vk
-	tk, tc, a = getHttpConfig()
-	if !bytes.Equal(tk, vk) || !bytes.Equal(tc, dtc) || a != defaultAddress {
+	pk := path.Join(util.Testdir, "test-key")
+	util.WithNewFileF(t, pk, func(f *os.File) error {
+		_, err := f.Write([]byte(testTlsKey))
+		return err
+	})
+	pc := path.Join(util.Testdir, "test-cert")
+	util.WithNewFileF(t, pc, func(f *os.File) error {
+		_, err := f.Write([]byte(testTlsCert))
+		return err
+	})
+	s.http.tls.keyFile = pk
+	s.http.tls.certFile = pc
+	s.http.address = ":9091"
+	key, cert, address, err = getTcpSettings(&s)
+	if err != nil ||
+		!bytes.Equal(key, []byte(testTlsKey)) ||
+		!bytes.Equal(cert, []byte(testTlsCert)) ||
+		address != ":9091" {
 		t.Fail()
 	}
+}
 
-	// set TLS cert
-	cfg = config{}
-	cfg.http.tls.cert = vc
-	tk, tc, a = getHttpConfig()
-	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, vc) || a != defaultAddress {
-		t.Fail()
+func TestGetTcpSettingsNotRoot(t *testing.T) {
+	if util.IsRoot {
+		t.Skip()
 	}
 
-	// set address
-	cfg = config{}
-	cfg.http.address = ":8080"
-	tk, tc, a = getHttpConfig()
-	if !bytes.Equal(tk, dtk) || !bytes.Equal(tc, dtc) || a != ":8080" {
+	p := path.Join(util.Testdir, "test-key")
+	util.WithNewFileF(t, p, nil)
+	err := os.Chmod(p, 0)
+	util.ErrFatal(t, err)
+	defer func() {
+		err := os.Chmod(p, os.ModePerm)
+		util.ErrFatal(t, err)
+	}()
+	s := settings{}
+	s.http.tls.keyFile = p
+	_, _, _, err = getTcpSettings(&s)
+	if err == nil {
 		t.Fail()
 	}
-
-	cfg = cfgOrig
 }
 
 func TestListen(t *testing.T) {
-	// port used
-	ll, err := net.Listen("tcp", ":9191")
-	if err != nil {
-		t.Fatal()
-	}
-	defer ll.Close()
-	l, err := listen(nil, nil, ":9191")
+	pk := path.Join(util.Testdir, "key-file")
+	util.WithNewFileF(t, pk, func(f *os.File) error {
+		_, err := f.Write([]byte("123"))
+		return err
+	})
+	var s settings
+	s.http.tls.keyFile = pk
+	_, err := listen(&s)
 	if err == nil {
 		t.Fail()
 	}
-
-	// invalid TLS
-	l, err = listen(nil, nil, ":9090")
-	if err == nil {
-		t.Fail()
-	}
-
-	// ok
-	l, err = listen([]byte(defaultTlsKey), []byte(defaultTlsCert), defaultAddress)
-	if err != nil {
-		t.Fail()
-	}
-	defer l.Close()
 }

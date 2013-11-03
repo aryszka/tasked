@@ -47,8 +47,8 @@ func (f AuthFunc) Authenticate(username, password string) error {
 	return f(username, password)
 }
 
-// A type that implements Config can be used to pass initialization values to the package.
-type Config interface {
+// A type that implements Settings can be used to pass initialization values to the package.
+type Settings interface {
 	AesKey() []byte     // AES key used for encryption
 	AesIv() []byte      // AES iv used for encryption
 	TokenValidity() int // Validity duration of the generated authentication tokens in seconds.
@@ -188,7 +188,7 @@ func GetUser(t Token) (string, error) {
 // Initialization must happen before the first call to the Auth* methods. Reinitializing with
 // new keys will discard previously generated tokens. One process can use one 'instance' of
 // the auth package.
-func Init(c Config, a Authenticator) error {
+func Init(c Settings, a Authenticator) error {
 	if a == nil {
 		return errors.New("Authenticator must be defined.")
 	}

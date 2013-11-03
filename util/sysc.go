@@ -1,4 +1,4 @@
-package main
+package util
 
 import (
 	"fmt"
@@ -22,14 +22,14 @@ int cgetgrnam(char* nam, struct group *grp, char *buf, size_t buflen, struct gro
 */
 import "C"
 
-type group struct {
-	id   uint32
-	name string
+type Group struct {
+	Id   uint32
+	Name string
 }
 
 func lookupGroup(
 	getgrp func(*C.struct_group, *C.char, C.size_t, **C.struct_group) C.int,
-	nf func() error) (*group, error) {
+	nf func() error) (*Group, error) {
 	const maxGetGrpSize = 1024 // sorry, sysconf
 	var (
 		grp C.struct_group
@@ -45,21 +45,21 @@ func lookupGroup(
 	if res == nil {
 		return nil, nf()
 	}
-	return &group{id: uint32(grp.gr_gid), name: C.GoString(grp.gr_name)}, nil
+	return &Group{Id: uint32(grp.gr_gid), Name: C.GoString(grp.gr_name)}, nil
 }
 
-func lookupGroupById(gid uint32) (*group, error) {
+func LookupGroupById(gid uint32) (*Group, error) {
 	return lookupGroup(func(grp *C.struct_group, buf *C.char, bs C.size_t, res **C.struct_group) C.int {
 		return C.cgetgrgid(C.int(gid), grp, buf, bs, res)
 	}, func() error {
-		return fmt.Errorf("Unknown group id: %d.", gid)
+		return fmt.Errorf("Unknown Group id: %d.", gid)
 	})
 }
 
-func lookupGroupByName(gn string) (*group, error) {
+func LookupGroupByName(gn string) (*Group, error) {
 	return lookupGroup(func(grp *C.struct_group, buf *C.char, bs C.size_t, res **C.struct_group) C.int {
 		return C.cgetgrnam(C.CString(gn), grp, buf, bs, res)
 	}, func() error {
-		return fmt.Errorf("Unknown group name: %s.", gn)
+		return fmt.Errorf("Unknown Group name: %s.", gn)
 	})
 }
