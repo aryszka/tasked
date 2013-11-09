@@ -54,97 +54,84 @@ func makeRandom(l int) []byte {
 
 func makeKey() []byte { return makeRandom(aes.BlockSize) }
 
-func authFunc(u, p string) error {
+func checkFunc(u, p string) error {
 	if len(u) > 0 && u == p {
 		return nil
 	}
 	return errors.New("Authentication failed.")
 }
 
-func resetConfig() {
-	err := Init(&testConfig{makeKey(), makeKey(), 18}, AuthFunc(authFunc))
+func defaultInstance() *Type {
+	i, err := New(PasswordCheckerFunc(checkFunc), &testConfig{makeKey(), makeKey(), 18})
 	if err != nil {
-		panic("Failed to reset auth config.")
+		panic(err)
 	}
+	return i
 }
 
-func durNoRefresh() time.Duration {
-	return time.Duration(float64(tokenValidity) * renewThresholdRate / 3)
+func (a *Type) durNoRefresh() time.Duration {
+	return time.Duration(float64(a.tokenValidity) * renewThresholdRate / 3)
 }
 
-func pastNoRefresh() int64 {
-	return time.Now().Add(-durNoRefresh()).Unix()
+func (a *Type) pastNoRefresh() int64 {
+	return time.Now().Add(-a.durNoRefresh()).Unix()
 }
 
-func pastRefresh() int64 {
-	return time.Now().Add(-renewThreshold).Unix()
+func (a *Type) pastRefresh() int64 {
+	return time.Now().Add(-a.renewThreshold).Unix()
 }
 
-func pastInvalid() int64 {
-	return time.Now().Add(-tokenValidity).Unix()
+func (a *Type) pastInvalid() int64 {
+	return time.Now().Add(-a.tokenValidity).Unix()
 }
 
 func TestTokenEncryptDecrypt(t *testing.T) {
-	resetConfig()
+	i := defaultInstance()
+
 	tk := token{user: "some", created: 42}
-	v, err := encrypt(tk)
+	v, err := i.encrypt(tk)
 	if err != nil || v == nil || len(v) == 0 {
 		t.Fail()
 	}
 
-	verify, err := decryptToken(v)
+	verify, err := i.decryptToken(v)
 	if err != nil || !bytes.Equal(verify.val, v) ||
 		verify.user != tk.user || verify.created != tk.created {
 		t.Fail()
 	}
 
 	blank := make([]byte, len(v))
-	tk, err = decryptToken(blank)
+	tk, err = i.decryptToken(blank)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
 
 	random := makeRandom(len(v))
-	tk, err = decryptToken(random)
+	tk, err = i.decryptToken(random)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
 
 	tk = token{user: "some", created: 42}
-	v, _ = encrypt(tk)
-	tiv := iv
-	iv = makeKey()
-	_, err = decryptToken(v)
+	v, _ = i.encrypt(tk)
+	tiv := i.iv
+	i.iv = makeKey()
+	_, err = i.decryptToken(v)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
-	iv = tiv
-}
-
-func TestTokenValue(t *testing.T) {
-	resetConfig()
-	tk := token{user: "some", created: 42}
-	val := tk.Value()
-	if val == nil || !bytes.Equal(tk.val, val) {
-		t.Fail()
-	}
-
-	tk = token{user: "some", created: 42}
-	verify, err := encrypt(tk)
-	if err != nil || !bytes.Equal(val, verify) {
-		t.Fail()
-	}
+	i.iv = tiv
 }
 
 func TestEncryption(t *testing.T) {
-	resetConfig()
+	i := defaultInstance()
 	verifyEncryption := func() error {
 		test := "Test encryption message."
-		enc, err := crypt([]byte(test))
+		enc, err := i.crypt([]byte(test))
 		if err != nil {
 			return err
 		}
-		dec, err := crypt(enc)
+		dec, err := i.crypt(enc)
 		if err != nil {
 			return err
 		}
@@ -153,327 +140,373 @@ func TestEncryption(t *testing.T) {
 		}
 		return nil
 	}
-	key = makeKey()
-	iv = makeKey()
+	i.key = makeKey()
+	i.iv = makeKey()
 
 	if nil != verifyEncryption() {
 		t.Fail()
 	}
 
-	key = nil
+	i.key = nil
 	if nil == verifyEncryption() {
 		t.Fail()
 	}
 
-	key = makeKey()[:15]
-	iv = makeKey()[:15]
+	i.key = makeKey()[:15]
+	i.iv = makeKey()[:15]
 	if nil == verifyEncryption() {
 		t.Fail()
 	}
 }
 
 func TestValidate(t *testing.T) {
-	resetConfig()
+	i := defaultInstance()
+
 	tk := token{}
-	tback, err := validate(tk)
+	tback, err := i.validate(tk)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
 	tk = token{user: "test", created: time.Now().Unix()}
-	tback, err = validate(tk)
-	if err != nil || tback.user != tk.user || tback.created != tk.created {
+	tback, err = i.validate(tk)
+	if err != nil || tback.user != tk.user || tback.created != tk.created ||
+		!bytes.Equal(tback.val, tk.val) {
 		t.Fail()
 	}
 	tk = token{user: "test", created: time.Now().Unix()}
 	tk.Value()
-	tback, err = validate(tk)
+	tback, err = i.validate(tk)
 	if err != nil || tback.user != tk.user || tback.created != tk.created ||
 		!bytes.Equal(tback.val, tk.val) {
 		t.Fail()
 	}
 
-	created := pastNoRefresh()
+	created := i.pastNoRefresh()
 	tk = token{created: created}
 	val := tk.Value()
-	tk, err = validate(tk)
+	tk, err = i.validate(tk)
 	nval := tk.val
 	if err != nil || tk.created != created ||
 		!bytes.Equal(val, tk.Value()) || !bytes.Equal(val, nval) {
 		t.Fail()
 	}
 
-	created = pastRefresh()
+	created = i.pastRefresh()
 	tk = token{created: created}
+	val, err = i.encrypt(tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
 	val = tk.Value()
-	tk, err = validate(tk)
-	nval = tk.val
+	tk, err = i.validate(tk)
 	if err != nil || tk.created <= created ||
-		nval != nil || bytes.Equal(val, tk.Value()) {
+		bytes.Equal(val, tk.Value()) {
 		t.Fail()
 	}
 
-	tk = token{created: pastInvalid()}
-	_, err = validate(tk)
+	tk = token{created: i.pastInvalid()}
+	_, err = i.validate(tk)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
 }
 
 func TestValidateTime(t *testing.T) {
-	resetConfig()
 	if !testLong {
 		t.Skip()
 	}
+	i := defaultInstance()
 	created := time.Now().Unix()
 	tk := token{created: created}
 	val := tk.Value()
 
-	time.Sleep(durNoRefresh())
-	tk, err := validate(tk)
+	time.Sleep(i.durNoRefresh())
+	tk, err := i.validate(tk)
 	nval := tk.val
 	if err != nil || tk.created != created ||
 		!bytes.Equal(val, tk.Value()) || !bytes.Equal(val, nval) {
 		t.Fail()
 	}
 
-	time.Sleep(renewThreshold)
-	tk, err = validate(tk)
+	time.Sleep(i.renewThreshold)
+	tk, err = i.validate(tk)
 	nval = tk.val
 	if err != nil || tk.created <= created ||
 		nval != nil || bytes.Equal(val, tk.Value()) {
 		t.Fail()
 	}
 
-	time.Sleep(tokenValidity)
-	_, err = validate(tk)
+	time.Sleep(i.tokenValidity)
+	_, err = i.validate(tk)
 	if err == nil || err.Error() != invalidTokenMessage {
 		t.Fail()
 	}
 }
 
 func TestAuthToken(t *testing.T) {
-	resetConfig()
-	_, err := AuthToken(nil)
+	i := defaultInstance()
+	_, err := i.AuthToken(nil)
 	if err == nil {
 		t.Fail()
 	}
 
 	tt := &testToken{}
-	_, err = AuthToken(tt)
+	_, err = i.AuthToken(tt)
 	if err == nil {
 		t.Fail()
 	}
 
 	tk := &token{created: time.Now().Unix()}
+	val, err := i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
 	tt = &testToken{tk.Value()}
-	tback, err := AuthToken(tt)
+	tback, err := i.AuthToken(tt)
 	if err != nil || tback == nil || !bytes.Equal(tk.Value(), tback.Value()) {
 		t.Fail()
 	}
 
 	random := makeRandom(len(tk.Value()))
 	tt = &testToken{random}
-	_, err = AuthToken(tt)
+	_, err = i.AuthToken(tt)
 	if err == nil {
 		t.Fail()
 	}
 
-	tback, err = AuthToken(tk)
+	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tk.Value(), tback.Value()) {
 		t.Fail()
 	}
 
-	_, err = AuthToken(&token{})
+	_, err = i.AuthToken(&token{})
 	if err == nil {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Unix()}
-	tiv := iv
-	iv = makeKey()
-	_, err = AuthToken(&token{})
+	tiv := i.iv
+	i.iv = makeKey()
+	_, err = i.AuthToken(&token{})
 	if err == nil {
 		t.Fail()
 	}
-	iv = tiv
+	i.iv = tiv
 
-	tk = &token{created: pastNoRefresh()}
-	tback, err = AuthToken(tk)
+	tk = &token{created: i.pastNoRefresh()}
+	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
-	tk = &token{created: pastRefresh()}
-	tback, err = AuthToken(tk)
+	tk = &token{created: i.pastRefresh()}
+	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
-	tk = &token{created: pastInvalid()}
-	_, err = AuthToken(tk)
+	tk = &token{created: i.pastInvalid()}
+	_, err = i.AuthToken(tk)
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestAuthTokenTime(t *testing.T) {
-	resetConfig()
 	if !testLong {
 		t.Skip()
 	}
 
+	i := defaultInstance()
 	tk := &token{created: time.Now().Unix()}
-	time.Sleep(durNoRefresh())
-	tback, err := AuthToken(tk)
+	time.Sleep(i.durNoRefresh())
+	tback, err := i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
-	time.Sleep(renewThreshold)
-	tback, err = AuthToken(tk)
+	time.Sleep(i.renewThreshold)
+	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
-	time.Sleep(tokenValidity)
-	_, err = AuthToken(tk)
+	time.Sleep(i.tokenValidity)
+	_, err = i.AuthToken(tk)
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestAuthBytes(t *testing.T) {
-	resetConfig()
-	_, err := AuthTokenBytes(nil)
+	i := defaultInstance()
+	_, err := i.AuthTokenBytes(nil)
 	if err == nil {
 		t.Fail()
 	}
 
 	tk := &token{}
+	val, err := i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
 	blank := make([]byte, len(tk.Value()))
-	_, err = AuthTokenBytes(blank)
+	_, err = i.AuthTokenBytes(blank)
 	if err == nil {
 		t.Fail()
 	}
 
 	random := makeRandom(len(tk.Value()))
-	_, err = AuthTokenBytes(random)
+	_, err = i.AuthTokenBytes(random)
 	if err == nil {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Unix()}
-	tback, err := AuthTokenBytes(tk.Value())
+	val, err = i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
+	tback, err := i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{}
-	_, err = AuthTokenBytes(tk.Value())
+	val, err = i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
+	_, err = i.AuthTokenBytes(tk.Value())
 	if err == nil {
 		t.Fail()
 	}
 
-	tk = &token{created: pastNoRefresh()}
-	tback, err = AuthTokenBytes(tk.Value())
+	tk = &token{created: i.pastNoRefresh()}
+	val, err = i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
-	tk = &token{created: pastRefresh()}
-	tback, err = AuthTokenBytes(tk.Value())
+	tk = &token{created: i.pastRefresh()}
+	val, err = i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
-	tk = &token{created: pastInvalid()}
-	_, err = AuthTokenBytes(tk.Value())
+	tk = &token{created: i.pastInvalid()}
+	val, err = i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
+	_, err = i.AuthTokenBytes(tk.Value())
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestAuthBytesTime(t *testing.T) {
-	resetConfig()
 	if !testLong {
 		t.Skip()
 	}
+	i := defaultInstance()
 
 	tk := &token{created: time.Now().Unix()}
-	time.Sleep(durNoRefresh())
-	tback, err := AuthTokenBytes(tk.Value())
+	time.Sleep(i.durNoRefresh())
+	tback, err := i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Unix()}
-	time.Sleep(renewThreshold)
-	tback, err = AuthTokenBytes(tk.Value())
+	time.Sleep(i.renewThreshold)
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{created: time.Now().Unix()}
-	time.Sleep(tokenValidity)
-	_, err = AuthTokenBytes(tk.Value())
+	time.Sleep(i.tokenValidity)
+	_, err = i.AuthTokenBytes(tk.Value())
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestGetUser(t *testing.T) {
-	resetConfig()
-	_, err := GetUser(nil)
+	i := defaultInstance()
+	_, err := i.GetUser(nil)
 	if err == nil {
 		t.Fail()
 	}
 
 	tk := &token{user: "test"}
-	user, err := GetUser(tk)
+	val, err := i.encrypt(*tk)
+	if err != nil {
+		t.Fatal()
+	}
+	tk.val = val
+	user, err := i.GetUser(tk)
 	if err != nil || user != "test" {
 		t.Fail()
 	}
 
 	tt := &testToken{val: tk.Value()}
-	user, err = GetUser(tt)
+	user, err = i.GetUser(tt)
 	if err != nil || user != "test" {
 		t.Fail()
 	}
 
 	tt = &testToken{val: makeRandom(len(tk.Value()))}
-	_, err = GetUser(tt)
+	_, err = i.GetUser(tt)
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestAuthPwd(t *testing.T) {
-	resetConfig()
-	tk, err := AuthPwd("c", "c")
-	if err != nil || tk == nil {
+	i := defaultInstance()
+	tk, err := i.AuthPwd("c", "c")
+	if err != nil || tk == nil || tk.Value() == nil {
 		t.Fail()
 	}
-	_, err = AuthPwd("c", "d")
+	_, err = i.AuthPwd("c", "d")
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestAuthFull(t *testing.T) {
-	resetConfig()
-	tk, err := AuthPwd("cred", "cred")
+	i := defaultInstance()
+	tk, err := i.AuthPwd("cred", "cred")
 	if err != nil || tk == nil {
 		t.Fail()
 	}
-	tback, err := AuthToken(tk)
+	tback, err := i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
-	tback, err = AuthTokenBytes(tk.Value())
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
-	userBack, err := GetUser(tk)
+	userBack, err := i.GetUser(tk)
 	if err != nil || userBack != "cred" {
 		t.Fail()
 	}
@@ -483,47 +516,48 @@ func TestAuthFullTime(t *testing.T) {
 	if !testLong {
 		t.Skip()
 	}
-	resetConfig()
-	tk, err := AuthPwd("c", "c")
+	i := defaultInstance()
+	tk, err := i.AuthPwd("c", "c")
 	if err != nil || tk == nil {
 		t.Fail()
 	}
 	time.Sleep(time.Second)
-	tback, err := AuthToken(tk)
+	tback, err := i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
-	tback, err = AuthTokenBytes(tk.Value())
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	time.Sleep(2 * time.Second)
-	tback, err = AuthToken(tk)
+	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
-	tback, err = AuthTokenBytes(tk.Value())
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 	time.Sleep(20 * time.Second)
-	tback, err = AuthToken(tk)
+	tback, err = i.AuthToken(tk)
 	if err == nil {
 		t.Fail()
 	}
-	tback, err = AuthTokenBytes(tk.Value())
+	tback, err = i.AuthTokenBytes(tk.Value())
 	if err == nil {
 		t.Fail()
 	}
 }
 
 func TestEncryptionOfLongData(t *testing.T) {
+	i := defaultInstance()
 	data := makeRandom(1 << 18)
-	encrypted, err := crypt(data)
+	encrypted, err := i.crypt(data)
 	if err != nil {
 		t.Fail()
 	}
-	decrypted, err := crypt(encrypted)
+	decrypted, err := i.crypt(encrypted)
 	if err != nil {
 		t.Fail()
 	}

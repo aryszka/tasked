@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"testing"
+	tst "code.google.com/p/tasked/testing"
 )
 
 const (
@@ -54,8 +55,8 @@ func TestReadKey(t *testing.T) {
 	}
 
 	tkey := []byte("1234567890123456")
-	p := path.Join(util.Testdir, "test-key")
-	util.WithNewFileF(t, p, func(f *os.File) error {
+	p := path.Join(tst.Testdir, "test-key")
+	tst.WithNewFileF(t, p, func(f *os.File) error {
 		_, err := f.Write(tkey)
 		return err
 	})
@@ -64,7 +65,7 @@ func TestReadKey(t *testing.T) {
 		t.Fail()
 	}
 
-	util.RemoveIfExistsF(t, p)
+	tst.RemoveIfExistsF(t, p)
 	key, err = readKey(p)
 	if err != nil || key != nil {
 		t.Fail()
@@ -81,13 +82,13 @@ func TestGetTcpSettings(t *testing.T) {
 		t.Fail()
 	}
 
-	pk := path.Join(util.Testdir, "test-key")
-	util.WithNewFileF(t, pk, func(f *os.File) error {
+	pk := path.Join(tst.Testdir, "test-key")
+	tst.WithNewFileF(t, pk, func(f *os.File) error {
 		_, err := f.Write([]byte(testTlsKey))
 		return err
 	})
-	pc := path.Join(util.Testdir, "test-cert")
-	util.WithNewFileF(t, pc, func(f *os.File) error {
+	pc := path.Join(tst.Testdir, "test-cert")
+	tst.WithNewFileF(t, pc, func(f *os.File) error {
 		_, err := f.Write([]byte(testTlsCert))
 		return err
 	})
@@ -108,13 +109,13 @@ func TestGetTcpSettingsNotRoot(t *testing.T) {
 		t.Skip()
 	}
 
-	p := path.Join(util.Testdir, "test-key")
-	util.WithNewFileF(t, p, nil)
+	p := path.Join(tst.Testdir, "test-key")
+	tst.WithNewFileF(t, p, nil)
 	err := os.Chmod(p, 0)
-	util.ErrFatal(t, err)
+	tst.ErrFatal(t, err)
 	defer func() {
 		err := os.Chmod(p, os.ModePerm)
-		util.ErrFatal(t, err)
+		tst.ErrFatal(t, err)
 	}()
 	s := settings{}
 	s.http.tls.keyFile = p
@@ -125,8 +126,8 @@ func TestGetTcpSettingsNotRoot(t *testing.T) {
 }
 
 func TestListen(t *testing.T) {
-	pk := path.Join(util.Testdir, "key-file")
-	util.WithNewFileF(t, pk, func(f *os.File) error {
+	pk := path.Join(tst.Testdir, "key-file")
+	tst.WithNewFileF(t, pk, func(f *os.File) error {
 		_, err := f.Write([]byte("123"))
 		return err
 	})

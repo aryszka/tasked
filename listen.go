@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-const noTlsWarning = "TLS has not been set."
+const noTlsWarning = "TLS has not been configured."
 
 func readKey(fn string) ([]byte, error) {
 	if len(fn) == 0 {
@@ -22,13 +22,21 @@ func readKey(fn string) ([]byte, error) {
 }
 
 func getTcpSettings(s *settings) ([]byte, []byte, string, error) {
-	tlsKey, err := readKey(s.http.tls.keyFile)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	tlsCert, err := readKey(s.http.tls.certFile)
-	if err != nil {
-		return nil, nil, "", err
+	var (
+		tlsKey, tlsCert []byte
+		address         string
+		err             error
+	)
+	if s != nil {
+		tlsKey, err = readKey(s.http.tls.keyFile)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		tlsCert, err = readKey(s.http.tls.certFile)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		address = s.http.address
 	}
 	if len(tlsKey) == 0 || len(tlsCert) == 0 {
 		log.Println(noTlsWarning)
@@ -39,7 +47,6 @@ func getTcpSettings(s *settings) ([]byte, []byte, string, error) {
 	if len(tlsCert) == 0 {
 		tlsCert = []byte(defaultTlsCert)
 	}
-	address := s.http.address
 	if len(address) == 0 {
 		address = defaultAddress
 	}

@@ -1,57 +1,11 @@
 package util
 
 import (
-	"errors"
-	"os"
-	"path"
 	"testing"
-	"time"
+	"path"
+	"os"
+	tst "code.google.com/p/tasked/testing"
 )
-
-func TestDoRetryReport(t *testing.T) {
-	// succeed first
-	c := 0
-	Doretrep(func() error {
-		c = c + 1
-		return nil
-	}, 0, nil)
-	if c != 1 {
-		t.Fail()
-	}
-
-	// succeed second
-	done := make(chan int)
-	c = 0
-	Doretrep(func() error {
-		c = c + 1
-		switch c {
-		case 1:
-			return errors.New("error")
-		default:
-			done <- 0
-			return nil
-		}
-	}, 42*time.Millisecond, nil)
-	<-done
-	if c != 2 {
-		t.Fail()
-	}
-
-	// fail
-	c = 0
-	var errs []interface{} = nil
-	Doretrep(func() error {
-		c = c + 1
-		return errors.New("error")
-	}, 42*time.Millisecond, func(es ...interface{}) {
-		errs = es
-		done <- 0
-	})
-	<-done
-	if c != 2 || len(errs) != 2 {
-		t.Fail()
-	}
-}
 
 func TestAbspath(t *testing.T) {
 	p := Abspath("/", "")
@@ -95,7 +49,7 @@ func TestEnsureDir(t *testing.T) {
 	const syserr = "Cannot create test file."
 
 	// exists and directory
-	tp := path.Join(Testdir, "some")
+	tp := path.Join(tst.Testdir, "some")
 	err := os.RemoveAll(tp)
 	if err != nil {
 		t.Fatal(syserr)
@@ -145,19 +99,19 @@ func TestEnsureDir(t *testing.T) {
 }
 
 func TestCheckPath(t *testing.T) {
-	p := path.Join(Testdir, "test-file")
-	RemoveIfExistsF(t, p)
+	p := path.Join(tst.Testdir, "test-file")
+	tst.RemoveIfExistsF(t, p)
 	ok, err := CheckPath(p, false)
 	if ok || err != nil {
 		t.Fail()
 	}
-	WithNewFileF(t, p, nil)
+	tst.WithNewFileF(t, p, nil)
 	ok, err = CheckPath(p, false)
 	if !ok || err != nil {
 		t.Fail()
 	}
-	RemoveIfExistsF(t, p)
-	EnsureDirF(t, p)
+	tst.RemoveIfExistsF(t, p)
+	tst.EnsureDirF(t, p)
 	ok, err = CheckPath(p, false)
 	if ok || err != nil {
 		t.Fail()
@@ -173,14 +127,14 @@ func TestCheckPathNotRoot(t *testing.T) {
 		t.Skip()
 	}
 
-	dir := path.Join(Testdir, "dir")
-	EnsureDirF(t, dir)
+	dir := path.Join(tst.Testdir, "dir")
+	tst.EnsureDirF(t, dir)
 	p := path.Join(dir, "test-file")
-	WithNewFileF(t, p, nil)
+	tst.WithNewFileF(t, p, nil)
 	err := os.Chmod(dir, 0)
 	defer func() {
 		err = os.Chmod(dir, os.ModePerm)
-		ErrFatal(t, err)
+		tst.ErrFatal(t, err)
 	}()
 	ok, err := CheckPath(p, false)
 	if ok || err == nil {

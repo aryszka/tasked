@@ -57,6 +57,7 @@ type settings struct {
 	}
 }
 
+func (s *settings) Root() string          { return s.files.root }
 func (s *settings) MaxRequestBody() int64 { return s.http.maxRequestBody }
 func (s *settings) MaxSearchResults() int { return s.files.search.maxResults }
 

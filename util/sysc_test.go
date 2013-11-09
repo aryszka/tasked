@@ -4,12 +4,13 @@ import (
 	"os/user"
 	"strconv"
 	"testing"
+	tst "code.google.com/p/tasked/testing"
 )
 
 func TestLookupGroupById(t *testing.T) {
 	u, err := user.Current()
 	gid, err := strconv.Atoi(u.Gid)
-	ErrFatal(t, err)
+	tst.ErrFatal(t, err)
 	grp, err := LookupGroupById(uint32(gid))
 	if err != nil || grp.Id != uint32(gid) {
 		t.Fail()
@@ -23,9 +24,9 @@ func TestLookupGroupById(t *testing.T) {
 func TestLookupGroupByName(t *testing.T) {
 	u, err := user.Current()
 	gid, err := strconv.Atoi(u.Gid)
-	ErrFatal(t, err)
+	tst.ErrFatal(t, err)
 	grpv, err := LookupGroupById(uint32(gid))
-	ErrFatal(t, err)
+	tst.ErrFatal(t, err)
 	grp, err := LookupGroupByName(grpv.Name)
 	if err != nil || grp.Id != uint32(gid) || grp.Name != grpv.Name {
 		t.Fail()
