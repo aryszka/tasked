@@ -2,7 +2,7 @@ package main
 
 import (
 	"code.google.com/p/gcfg"
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
 	"flag"
 	"os"
 	"path"
@@ -78,12 +78,12 @@ func readFlags(s *settings) error {
 	if err != nil {
 		return err
 	}
-	s.configFile = util.AbspathNotEmpty(s.configFile, wd)
-	s.sec.aes.keyFile = util.AbspathNotEmpty(s.sec.aes.keyFile, wd)
-	s.sec.aes.ivFile = util.AbspathNotEmpty(s.sec.aes.ivFile, wd)
-	s.http.tls.keyFile = util.AbspathNotEmpty(s.http.tls.keyFile, wd)
-	s.http.tls.certFile = util.AbspathNotEmpty(s.http.tls.certFile, wd)
-	s.files.root = util.AbspathNotEmpty(s.files.root, wd)
+	s.configFile = share.AbspathNotEmpty(s.configFile, wd)
+	s.sec.aes.keyFile = share.AbspathNotEmpty(s.sec.aes.keyFile, wd)
+	s.sec.aes.ivFile = share.AbspathNotEmpty(s.sec.aes.ivFile, wd)
+	s.http.tls.keyFile = share.AbspathNotEmpty(s.http.tls.keyFile, wd)
+	s.http.tls.certFile = share.AbspathNotEmpty(s.http.tls.certFile, wd)
+	s.files.root = share.AbspathNotEmpty(s.files.root, wd)
 
 	return nil
 }
@@ -94,10 +94,10 @@ func getConfigPath() (string, error) {
 		return p, nil
 	}
 	p = path.Join(os.Getenv("HOME"), defaultConfigBaseName)
-	if ok, err := util.CheckPath(p, false); ok || err != nil {
+	if ok, err := share.CheckPath(p, false); ok || err != nil {
 		return p, err
 	}
-	if ok, err := util.CheckPath(sysConfig, false); ok || err != nil {
+	if ok, err := share.CheckPath(sysConfig, false); ok || err != nil {
 		return sysConfig, err
 	}
 	return "", nil
@@ -122,19 +122,19 @@ func readConfig(s *settings) error {
 	dir := path.Dir(s.configFile)
 
 	if len(s.sec.aes.keyFile) == 0 {
-		s.sec.aes.keyFile = util.AbspathNotEmpty(rcfg.Sec.AesKeyFile, dir)
+		s.sec.aes.keyFile = share.AbspathNotEmpty(rcfg.Sec.AesKeyFile, dir)
 	}
 	if len(s.sec.aes.ivFile) == 0 {
-		s.sec.aes.ivFile = util.AbspathNotEmpty(rcfg.Sec.AesIvFile, dir)
+		s.sec.aes.ivFile = share.AbspathNotEmpty(rcfg.Sec.AesIvFile, dir)
 	}
 	if s.sec.tokenValidity <= 0 && rcfg.Sec.TokenValidity > 0 {
 		s.sec.tokenValidity = rcfg.Sec.TokenValidity
 	}
 	if len(s.http.tls.keyFile) == 0 {
-		s.http.tls.keyFile = util.AbspathNotEmpty(rcfg.Http.TlsKeyFile, dir)
+		s.http.tls.keyFile = share.AbspathNotEmpty(rcfg.Http.TlsKeyFile, dir)
 	}
 	if len(s.http.tls.certFile) == 0 {
-		s.http.tls.certFile = util.AbspathNotEmpty(rcfg.Http.TlsCertFile, dir)
+		s.http.tls.certFile = share.AbspathNotEmpty(rcfg.Http.TlsCertFile, dir)
 	}
 	if len(s.http.address) == 0 {
 		s.http.address = rcfg.Http.Address
@@ -143,7 +143,7 @@ func readConfig(s *settings) error {
 		s.http.maxRequestBody = rcfg.Http.MaxRequestBody
 	}
 	if len(s.files.root) == 0 {
-		s.files.root = util.AbspathNotEmpty(rcfg.Files.Root, dir)
+		s.files.root = share.AbspathNotEmpty(rcfg.Files.Root, dir)
 	}
 	if s.files.search.maxResults <= 0 && rcfg.Files.MaxSearchResults > 0 {
 		s.files.search.maxResults = rcfg.Files.MaxSearchResults

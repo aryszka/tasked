@@ -1,10 +1,11 @@
-package util
+package share
 
 import (
-	"time"
 	"log"
+	"time"
 )
 
+// YOLO
 func Doretrep(do func() error, delay time.Duration, report func(...interface{})) {
 	err0 := do()
 	if err0 == nil {

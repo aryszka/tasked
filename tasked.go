@@ -3,7 +3,7 @@ package main
 import (
 	"code.google.com/p/tasked/auth"
 	"code.google.com/p/tasked/htfile"
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
 	"log"
 	"net"
 	"net/http"
@@ -33,8 +33,12 @@ func main() {
 	if l, err = listen(s); err != nil {
 		log.Panicln(err)
 	}
-	defer util.Doretlog42(l.Close)
+	defer share.Doretlog42(l.Close)
 	if err = http.Serve(l, m); err != nil {
 		log.Panicln(err)
 	}
 }
+
+// todo:
+// - document that character encoding of request data is always assumed to be utf-8, explicit declarations are
+// ignored

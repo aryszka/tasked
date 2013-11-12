@@ -1,10 +1,10 @@
-package util
+package share
 
 import (
-	"testing"
-	"path"
-	"os"
 	tst "code.google.com/p/tasked/testing"
+	"os"
+	"path"
+	"testing"
 )
 
 func TestAbspath(t *testing.T) {

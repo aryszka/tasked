@@ -1,11 +1,11 @@
-package util
+package share
 
 import (
 	"os/user"
 	"syscall"
 )
 
-var IsRoot   bool
+var IsRoot bool
 
 func init() {
 	syscall.Umask(0077)

@@ -102,13 +102,13 @@ func TestTokenEncryptDecrypt(t *testing.T) {
 
 	blank := make([]byte, len(v))
 	tk, err = i.decryptToken(blank)
-	if err == nil || err.Error() != invalidTokenMessage {
+	if err == nil || err != invalidToken {
 		t.Fail()
 	}
 
 	random := makeRandom(len(v))
 	tk, err = i.decryptToken(random)
-	if err == nil || err.Error() != invalidTokenMessage {
+	if err == nil || err != invalidToken {
 		t.Fail()
 	}
 
@@ -117,7 +117,7 @@ func TestTokenEncryptDecrypt(t *testing.T) {
 	tiv := i.iv
 	i.iv = makeKey()
 	_, err = i.decryptToken(v)
-	if err == nil || err.Error() != invalidTokenMessage {
+	if err == nil || err != invalidToken {
 		t.Fail()
 	}
 	i.iv = tiv
@@ -164,7 +164,7 @@ func TestValidate(t *testing.T) {
 
 	tk := token{}
 	tback, err := i.validate(tk)
-	if err == nil || err.Error() != invalidTokenMessage {
+	if err == nil || err != invalidToken {
 		t.Fail()
 	}
 	tk = token{user: "test", created: time.Now().Unix()}
@@ -207,7 +207,7 @@ func TestValidate(t *testing.T) {
 
 	tk = token{created: i.pastInvalid()}
 	_, err = i.validate(tk)
-	if err == nil || err.Error() != invalidTokenMessage {
+	if err == nil || err != invalidToken {
 		t.Fail()
 	}
 }
@@ -239,7 +239,7 @@ func TestValidateTime(t *testing.T) {
 
 	time.Sleep(i.tokenValidity)
 	_, err = i.validate(tk)
-	if err == nil || err.Error() != invalidTokenMessage {
+	if err == nil || err != invalidToken {
 		t.Fail()
 	}
 }

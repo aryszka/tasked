@@ -2,7 +2,8 @@ package htfile
 
 import (
 	"bytes"
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
+	tst "code.google.com/p/tasked/testing"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	tst "code.google.com/p/tasked/testing"
 )
 
 type testSettings struct {
@@ -50,7 +50,7 @@ func init() {
 	getDirRoot = *tgdr
 
 	dn = path.Join(tst.Testdir, "http")
-	err := util.EnsureDir(dn)
+	err := share.EnsureDir(dn)
 	if err != nil {
 		panic(err)
 	}
@@ -213,52 +213,6 @@ func newHandler(t *testing.T, s Settings) http.Handler {
 	return h
 }
 
-func TestMaxReader(t *testing.T) {
-	buf := bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
-	mr := &maxReader{reader: buf, count: 0}
-	b := make([]byte, 32)
-	n, err := mr.Read(b)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-
-	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
-	mr = &maxReader{reader: buf, count: 6}
-	b = make([]byte, 32)
-	n, err = mr.Read(b)
-	if n != 6 || err != nil || mr.count != 0 {
-		t.Fail()
-	}
-	n, err = mr.Read(b)
-	if n != 0 || err == nil || mr.count != 0 {
-		t.Fail()
-	}
-
-	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
-	mr = &maxReader{reader: buf, count: 12}
-	b = make([]byte, 32)
-	n, err = mr.Read(b)
-	if n != 12 || err != nil || mr.count != 0 {
-		t.Fail()
-	}
-	n, err = mr.Read(b)
-	if n != 0 || err == nil || mr.count != 0 {
-		t.Fail()
-	}
-
-	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
-	mr = &maxReader{reader: buf, count: 64}
-	b = make([]byte, 32)
-	n, err = mr.Read(b)
-	if n != 12 || err != nil || mr.count != 52 {
-		t.Fail()
-	}
-	n, err = mr.Read(b)
-	if n != 0 || err != io.EOF || mr.count != 52 {
-		t.Fail()
-	}
-}
-
 func TestToPropertyMap(t *testing.T) {
 	var (
 		defaultTime time.Time
@@ -335,7 +289,7 @@ func TestToPropertyMap(t *testing.T) {
 	uid, err := strconv.Atoi(u.Uid)
 	gid, err := strconv.Atoi(u.Gid)
 	tst.ErrFatal(t, err)
-	g, err := util.LookupGroupById(uint32(gid))
+	g, err := share.LookupGroupById(uint32(gid))
 	tst.ErrFatal(t, err)
 	p = toPropertyMap(&fileInfoT{
 		name:    "some",
@@ -403,7 +357,7 @@ func TestIsOwner(t *testing.T) {
 }
 
 func TestIsOwnerNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -426,7 +380,7 @@ func TestIsOwnerNotRoot(t *testing.T) {
 }
 
 func TestIsOwnerRoot(t *testing.T) {
-	if !util.IsRoot {
+	if !share.IsRoot {
 		t.Skip()
 	}
 
@@ -446,52 +400,6 @@ func TestIsOwnerRoot(t *testing.T) {
 	if !is || err != nil {
 		t.Fail()
 	}
-}
-
-func TestWriteJsonResponse(t *testing.T) {
-	d := map[string]interface{}{"some": "data"}
-	js, err := json.Marshal(d)
-	tst.ErrFatal(t, err)
-	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
-		writeJsonResponse(w, r, d)
-	}
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK ||
-			rsp.Header.Get(headerContentType) != jsonContentType {
-			t.Fail()
-		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
-		tst.ErrFatal(t, err)
-		if clen != len(js) {
-			t.Fail()
-		}
-		b, err := ioutil.ReadAll(rsp.Body)
-		tst.ErrFatal(t, err)
-		if !bytes.Equal(b, js) {
-			t.Fail()
-		}
-		var jsBack map[string]interface{}
-		err = json.Unmarshal(b, &jsBack)
-		if err != nil || len(jsBack) != 1 || jsBack["some"] != "data" {
-			t.Fail()
-		}
-	})
-	tst.Htreq(t, "HEAD", tst.S.URL, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK ||
-			rsp.Header.Get(headerContentType) != jsonContentType {
-			t.Fail()
-		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
-		tst.ErrFatal(t, err)
-		if clen != len(js) {
-			t.Fail()
-		}
-		b, err := ioutil.ReadAll(rsp.Body)
-		tst.ErrFatal(t, err)
-		if !bytes.Equal(b, nil) {
-			t.Fail()
-		}
-	})
 }
 
 func TestDetectContentType(t *testing.T) {
@@ -731,7 +639,7 @@ func TestSearchFiles(t *testing.T) {
 }
 
 func TestSearchFilesNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -822,7 +730,7 @@ func TestCopyTree(t *testing.T) {
 }
 
 func TestCopyTreeNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -1143,7 +1051,7 @@ func TestSearchf(t *testing.T) {
 }
 
 func TestSearchNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -1233,10 +1141,10 @@ func TestPropsf(t *testing.T) {
 
 	tst.Htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
-			rsp.Header.Get(headerContentType) != jsonContentType {
+			rsp.Header.Get(share.HeaderContentType) != share.JsonContentType {
 			t.Fail()
 		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
 		tst.ErrFatal(t, err)
 		if len(jsVerify) != clen {
 			t.Fail()
@@ -1262,10 +1170,10 @@ func TestPropsf(t *testing.T) {
 	tst.WithNewFileF(t, p, nil)
 	tst.Htreq(t, "HEAD", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
-			rsp.Header.Get(headerContentType) != jsonContentType {
+			rsp.Header.Get(share.HeaderContentType) != share.JsonContentType {
 			t.Fail()
 		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
 		tst.ErrFatal(t, err)
 		if len(jsVerify) != clen {
 			t.Fail()
@@ -1280,7 +1188,7 @@ func TestPropsf(t *testing.T) {
 
 func TestPropsfRoot(t *testing.T) {
 	// Tests using Setuid cannot be run together until they're replaced by Seteuid
-	if !util.IsRoot || !propsRoot {
+	if !share.IsRoot || !propsRoot {
 		t.Skip()
 	}
 
@@ -1324,7 +1232,7 @@ func TestPropsfRoot(t *testing.T) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
 		tst.ErrFatal(t, err)
 		if len(jsVerify) != clen {
 			t.Fail()
@@ -1384,6 +1292,8 @@ func TestModpropsf(t *testing.T) {
 	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"mode\":  \"not a number\"}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusBadRequest {
+				t.Log("here")
+				t.Log(rsp.StatusCode)
 				t.Fail()
 			}
 		})
@@ -1495,7 +1405,7 @@ func TestModpropsf(t *testing.T) {
 
 func TestModpropsRoot(t *testing.T) {
 	// Tests using Setuid cannot be run together until they're replaced by Seteuid
-	if !util.IsRoot || !modpropsRoot {
+	if !share.IsRoot || !modpropsRoot {
 		t.Skip()
 	}
 
@@ -1679,7 +1589,7 @@ func TestGetDir(t *testing.T) {
 
 func TestGetDirRoot(t *testing.T) {
 	// Tests using Setuid cannot be run together until they're replaced by Seteuid
-	if !util.IsRoot || !getDirRoot {
+	if !share.IsRoot || !getDirRoot {
 		t.Skip()
 	}
 
@@ -1794,7 +1704,7 @@ func TestGetFile(t *testing.T) {
 	fi, err = f.Stat()
 	tst.ErrFatal(t, err)
 	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
-		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
 			t.Fail()
 		}
 	})
@@ -1818,10 +1728,10 @@ func TestGetFile(t *testing.T) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
-		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
 			t.Fail()
 		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
 		tst.ErrFatal(t, err)
 		if clen != len(html) {
 			t.Fail()
@@ -1844,10 +1754,10 @@ func TestGetFile(t *testing.T) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
-		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
 			t.Fail()
 		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
 		tst.ErrFatal(t, err)
 		if clen != len(html) {
 			t.Fail()
@@ -1873,10 +1783,10 @@ func TestGetFile(t *testing.T) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
-		if rsp.Header.Get(headerContentType) != "text/html; charset=utf-8" {
+		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
 			t.Fail()
 		}
-		clen, err := strconv.Atoi(rsp.Header.Get(headerContentLength))
+		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
 		tst.ErrFatal(t, err)
 		if clen != len(html) {
 			t.Fail()
@@ -1995,7 +1905,7 @@ func TestPutf(t *testing.T) {
 }
 
 func TestPutfNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -2252,7 +2162,7 @@ func TestRenamef(t *testing.T) {
 }
 
 func TestRenamefNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -2351,7 +2261,7 @@ func TestDeletef(t *testing.T) {
 }
 
 func TestDeletefNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 
@@ -2417,7 +2327,7 @@ func TestMkdirf(t *testing.T) {
 }
 
 func TestMkdirfNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 

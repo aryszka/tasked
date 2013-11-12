@@ -1,16 +1,140 @@
-package util
+package share
 
 import (
-	"testing"
+	"bytes"
 	tst "code.google.com/p/tasked/testing"
-	"syscall"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"fmt"
-	"os"
-	"errors"
 	"net/url"
+	"os"
+	"strconv"
+	"syscall"
+	"testing"
 )
+
+func TestMaxReader(t *testing.T) {
+	buf := bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr := &MaxReader{Reader: buf, Count: 0}
+	b := make([]byte, 32)
+	n, err := mr.Read(b)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+
+	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr = &MaxReader{Reader: buf, Count: 6}
+	b = make([]byte, 32)
+	n, err = mr.Read(b)
+	if n != 6 || err != nil || mr.Count != 0 {
+		t.Fail()
+	}
+	n, err = mr.Read(b)
+	if n != 0 || err == nil || mr.Count != 0 {
+		t.Fail()
+	}
+
+	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr = &MaxReader{Reader: buf, Count: 12}
+	b = make([]byte, 32)
+	n, err = mr.Read(b)
+	if n != 12 || err != nil || mr.Count != 0 {
+		t.Fail()
+	}
+	n, err = mr.Read(b)
+	if n != 0 || err == nil || mr.Count != 0 {
+		t.Fail()
+	}
+
+	buf = bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
+	mr = &MaxReader{Reader: buf, Count: 64}
+	b = make([]byte, 32)
+	n, err = mr.Read(b)
+	if n != 12 || err != nil || mr.Count != 52 {
+		t.Fail()
+	}
+	n, err = mr.Read(b)
+	if n != 0 || err != io.EOF || mr.Count != 52 {
+		t.Fail()
+	}
+}
+
+func TestGetQryValuesCmd(t *testing.T) {
+	var (
+		qry url.Values
+		cmd string
+		err error
+	)
+	qry = url.Values{}
+	cmd, err = GetQryValuesCmd(qry, "all_")
+	if cmd != "" || err != nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{CmdProps}}
+	cmd, err = GetQryValuesCmd(qry, "all_")
+	if cmd != CmdProps || err != nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{CmdProps, CmdModprops}}
+	_, err = GetQryValuesCmd(qry, "all_")
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{CmdProps, CmdModprops}}
+	_, err = GetQryValuesCmd(qry, "all_", CmdModprops)
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{CmdModprops}}
+	_, err = GetQryValuesCmd(qry, "all_", CmdModprops)
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = url.Values{}
+	cmd, err = GetQryValuesCmd(qry)
+	if cmd != "" || err != nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{CmdProps}}
+	_, err = GetQryValuesCmd(qry)
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{"custom0"}}
+	cmd, err = GetQryValuesCmd(qry, "custom0", "custom1")
+	if cmd != "custom0" || err != nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{"custom0", "custom1"}}
+	_, err = GetQryValuesCmd(qry, "custom0", "custom1")
+	if err == nil {
+		t.Fail()
+	}
+
+	qry = url.Values{CmdKey: []string{"custom2"}}
+	_, err = GetQryValuesCmd(qry, "custom0", "custom1")
+	if err == nil {
+		t.Fail()
+	}
+}
+
+func TestGetQryCmd(t *testing.T) {
+	if _, err := GetQryCmd(&http.Request{URL: &url.URL{RawQuery: "%%"}}); err == nil {
+		t.Fail()
+	}
+}
 
 func TestHandleErrno(t *testing.T) {
 	var errno syscall.Errno
@@ -220,7 +344,7 @@ func TestCheckServerError(t *testing.T) {
 	test(false)
 }
 
-func TestChecValueskQryCmd(t *testing.T) {
+func TestCheckQryValuesCmd(t *testing.T) {
 	mkqry := func(u string) url.Values {
 		vs, err := url.ParseQuery(u)
 		tst.ErrFatal(t, err)
@@ -240,36 +364,117 @@ func TestChecValueskQryCmd(t *testing.T) {
 
 	test(mkqry("cmd=1"), true)
 	test(mkqry("cmd=1"), false, "1")
-	test(mkqry("cmd=1"), false, "1", "2")
-	test(mkqry("cmd=1&cmd=2"), true, "1", "2")
-	test(mkqry("cmd=1&cmd=1"), true, "1", "2")
-	test(mkqry("cmd=3"), true, "1", "2")
-
-	if cmd, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("")); !ok || len(cmd) > 0 {
-		t.Fail()
-	}
-	if _, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1")); ok {
-		t.Fail()
-	}
-	if cmd, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1"), "1"); !ok || cmd != "1" {
-		t.Fail()
-	}
-	if cmd, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1"), "1", "2"); !ok || cmd != "1" {
-		t.Fail()
-	}
-	if _, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1&cmd=2"), "1", "2"); ok {
-		t.Fail()
-	}
-	if _, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=1&cmd=1"), "1", "2"); ok {
-		t.Fail()
-	}
-	if _, ok := CheckQryValuesCmd(httptest.NewRecorder(), mkqry("cmd=3"), "1", "2"); ok {
-		t.Fail()
-	}
 }
 
 func TestCheckQryCmd(t *testing.T) {
 	if _, ok := CheckQryCmd(httptest.NewRecorder(), &http.Request{URL: &url.URL{RawQuery: "%%"}}); ok {
 		t.Fail()
 	}
+}
+
+func TestReadJsonRequest(t *testing.T) {
+	var (
+		maxreq = int64(1 << 10)
+		ip     interface{}
+		err    error
+	)
+	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
+		err = ReadJsonRequest(r, &ip, maxreq)
+	}
+
+	// not json
+	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("not json"), func(rsp *http.Response) {
+		if err != InvalidJson {
+			t.Fail()
+		}
+	})
+
+	// to big
+	maxreq = int64(4)
+	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"some\": \"long data here\"}"),
+		func(rsp *http.Response) {
+			if err != RequestBodyTooLarge {
+				t.Fail()
+			}
+		})
+	maxreq = int64(1 << 10)
+
+	// mixed
+	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"some\": \"some data\"} - outside of json"),
+		func(rsp *http.Response) {
+			if err != InvalidJson {
+				t.Fail()
+			}
+		})
+
+	// valid
+	ip = nil
+	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"some\": \"some data\"}"),
+		func(rsp *http.Response) {
+			if err != nil {
+				t.Fail()
+			}
+			m, ok := ip.(map[string]interface{})
+			if !ok {
+				t.Fail()
+			}
+			v, ok := m["some"]
+			if !ok || v != "some data" {
+				t.Fail()
+			}
+		})
+
+	// empty
+	ip = nil
+	tst.Htreq(t, "MODPROPS", tst.S.URL, nil, func(rsp *http.Response) {
+		if err != nil || ip != nil {
+			t.Fail()
+		}
+	})
+}
+
+func TestWriteJsonResponse(t *testing.T) {
+	d := map[string]interface{}{"some": "data"}
+	js, err := json.Marshal(d)
+	tst.ErrFatal(t, err)
+	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
+		WriteJsonResponse(w, r, d)
+	}
+	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK ||
+			rsp.Header.Get(HeaderContentType) != JsonContentType {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(HeaderContentLength))
+		tst.ErrFatal(t, err)
+		if clen != len(js) {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		tst.ErrFatal(t, err)
+		if !bytes.Equal(b, js) {
+			t.Fail()
+		}
+		var jsBack map[string]interface{}
+		err = json.Unmarshal(b, &jsBack)
+		if err != nil || len(jsBack) != 1 || jsBack["some"] != "data" {
+			t.Fail()
+		}
+	})
+	tst.Htreq(t, "HEAD", tst.S.URL, nil, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK ||
+			rsp.Header.Get(HeaderContentType) != JsonContentType {
+			t.Fail()
+		}
+		clen, err := strconv.Atoi(rsp.Header.Get(HeaderContentLength))
+		tst.ErrFatal(t, err)
+		if clen != len(js) {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		tst.ErrFatal(t, err)
+		if !bytes.Equal(b, nil) {
+			t.Fail()
+		}
+	})
 }

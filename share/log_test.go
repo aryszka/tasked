@@ -1,8 +1,8 @@
-package util
+package share
 
 import (
-	"testing"
 	"errors"
+	"testing"
 	"time"
 )
 

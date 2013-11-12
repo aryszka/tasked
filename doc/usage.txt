@@ -1,3 +1,9 @@
+What is it
+----------
+
+Tasked is kind of a strange web server with read/write access to static files, PAM authentication, proxied cascading and
+publish/subscribe notifications. A nice behaving building block for custom networking scenarios.
+
 Running
 -------
 

@@ -1,10 +1,10 @@
-package util
+package share
 
 import (
+	tst "code.google.com/p/tasked/testing"
 	"os/user"
 	"strconv"
 	"testing"
-	tst "code.google.com/p/tasked/testing"
 )
 
 func TestLookupGroupById(t *testing.T) {

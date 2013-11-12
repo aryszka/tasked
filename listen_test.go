@@ -2,11 +2,11 @@ package main
 
 import (
 	"bytes"
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
+	tst "code.google.com/p/tasked/testing"
 	"os"
 	"path"
 	"testing"
-	tst "code.google.com/p/tasked/testing"
 )
 
 const (
@@ -105,7 +105,7 @@ func TestGetTcpSettings(t *testing.T) {
 }
 
 func TestGetTcpSettingsNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 

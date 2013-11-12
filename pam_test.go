@@ -1,11 +1,11 @@
 package main
 
 import (
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
+	tst "code.google.com/p/tasked/testing"
 	"flag"
 	"path"
 	"testing"
-	tst "code.google.com/p/tasked/testing"
 )
 
 var testPam bool
@@ -17,7 +17,7 @@ func init() {
 }
 
 func TestAuthPam(t *testing.T) {
-	if !util.IsRoot || !testPam {
+	if !share.IsRoot || !testPam {
 		t.Skip()
 	}
 

@@ -17,7 +17,11 @@ import (
 const (
 	defaultTokenValidity = 60 * 60 * 24 * 90
 	renewThresholdRate   = 0.1
-	invalidTokenMessage  = "Invalid token."
+)
+
+var (
+	invalidToken      = errors.New("Invalid token.")
+	noPasswordChecker = errors.New("PasswordChecker must be defined.")
 )
 
 // Package auth uses implementations of PasswordChecker to verify the validity of a username and password pair.
@@ -76,7 +80,7 @@ func (a *Type) decryptToken(v []byte) (token, error) {
 	}
 	userPos := len(a.iv) + 8
 	if len(b) < userPos || !bytes.Equal(b[:len(a.iv)], a.iv) {
-		return t, errors.New(invalidTokenMessage)
+		return t, invalidToken
 	}
 	t.created, _ = binary.Varint(b[len(a.iv):userPos])
 	t.user = string(b[userPos:])
@@ -107,7 +111,7 @@ func (a *Type) crypt(in []byte) ([]byte, error) {
 func (a *Type) validate(t token) (token, error) {
 	d := time.Now().Sub(time.Unix(t.created, 0))
 	if d > a.tokenValidity {
-		return t, errors.New(invalidTokenMessage)
+		return t, invalidToken
 	}
 	if d < a.renewThreshold {
 		return t, nil
@@ -127,7 +131,7 @@ func (a *Type) validate(t token) (token, error) {
 // default is 90 days.)
 func New(c PasswordChecker, s Settings) (*Type, error) {
 	if c == nil {
-		return nil, errors.New("PasswordChecker must be defined.")
+		return nil, noPasswordChecker
 	}
 	var (
 		i             Type
@@ -178,7 +182,7 @@ func (a *Type) AuthPwd(user, pwd string) (Token, error) {
 // validity interval.
 func (a *Type) AuthToken(t Token) (Token, error) {
 	if t == nil {
-		return nil, errors.New(invalidTokenMessage)
+		return nil, invalidToken
 	}
 	var (
 		tc *token
@@ -204,7 +208,7 @@ func (a *Type) AuthTokenBytes(v []byte) (Token, error) {
 // the token has expired.)
 func (a *Type) GetUser(t Token) (string, error) {
 	if t == nil {
-		return "", errors.New(invalidTokenMessage)
+		return "", invalidToken
 	}
 	if tc, ok := t.(*token); ok {
 		return tc.user, nil

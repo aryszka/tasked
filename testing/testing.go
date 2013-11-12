@@ -1,4 +1,4 @@
-package util
+package testing
 
 import (
 	"os"
@@ -220,12 +220,16 @@ func Mkclient() *http.Client {
 				InsecureSkipVerify: true}}}
 }
 
-func Htreq(t Fataler, method, url string, body io.Reader, clb func(rsp *http.Response)) {
-	r, err := http.NewRequest(method, url, body)
-	ErrFatal(t, err)
+func Htreqr(t Fataler, r *http.Request, clb func(rsp *http.Response)) {
 	client := Mkclient()
 	rsp, err := client.Do(r)
 	ErrFatal(t, err)
 	defer rsp.Body.Close()
 	clb(rsp)
+}
+
+func Htreq(t Fataler, method, url string, body io.Reader, clb func(rsp *http.Response)) {
+	r, err := http.NewRequest(method, url, body)
+	ErrFatal(t, err)
+	Htreqr(t, r, clb)
 }

@@ -2,9 +2,14 @@ package main
 
 import (
 	"code.google.com/p/tasked/auth"
+	"code.google.com/p/tasked/share"
 	"errors"
 	"net/http"
-	"code.google.com/p/tasked/util"
+)
+
+var (
+	noAuth        = errors.New("Auth must be specified.")
+	noFileHandler = errors.New("File handler must be specified.")
 )
 
 type mux struct {
@@ -14,10 +19,10 @@ type mux struct {
 
 func newMux(a *auth.Type, file http.Handler) (http.Handler, error) {
 	if a == nil {
-		return nil, errors.New("Auth must be specified.")
+		return nil, noAuth
 	}
 	if file == nil {
-		return nil, errors.New("File handler must be specified.")
+		return nil, noFileHandler
 	}
 	var m mux
 	m.auth = a
@@ -31,7 +36,7 @@ func (m *mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// if handled return
 	// if authenticated, own process
 	// if not authenticated, htfile
-	if !util.IsRoot {
+	if !share.IsRoot {
 		m.file.ServeHTTP(w, r)
 		return
 	}

@@ -2,7 +2,7 @@ package htfile
 
 import (
 	"bufio"
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	jsonContentType         = "application/json; charset=utf-8"
 	defaultMaxRequestBody   = 1 << 30
 	modeMask                = os.FileMode(1)<<9 - 1
 	defaultMaxSearchResults = 30
@@ -29,13 +28,6 @@ const (
 	searchQueryName         = "name"
 	searchQueryContent      = "content"
 	copyRenameToKey         = "to"
-	cmdProps                = "props"
-	cmdSearch               = "search"
-	cmdModprops             = "modprops"
-	cmdDelete               = "delete"
-	cmdMkdir                = "mkdir"
-	cmdCopy                 = "copy"
-	cmdRename               = "rename"
 )
 
 type fileInfo struct {
@@ -49,23 +41,6 @@ func (fi *fileInfo) Mode() os.FileMode  { return fi.sys.Mode() }
 func (fi *fileInfo) ModTime() time.Time { return fi.sys.ModTime() }
 func (fi *fileInfo) IsDir() bool        { return fi.sys.IsDir() }
 func (fi *fileInfo) Sys() interface{}   { return fi.sys.Sys() }
-
-type maxReader struct {
-	reader io.Reader
-	count  int64
-}
-
-func (mr *maxReader) Read(b []byte) (n int, err error) {
-	if mr.count <= 0 {
-		return 0, errors.New("Maximum read count exceeded.")
-	}
-	if int64(len(b)) > mr.count {
-		b = b[:mr.count]
-	}
-	n, err = mr.reader.Read(b)
-	mr.count = mr.count - int64(n)
-	return
-}
 
 type queryHandler func(http.ResponseWriter, *http.Request, url.Values)
 
@@ -82,10 +57,6 @@ type Settings interface {
 }
 
 var (
-	headerContentType         = http.CanonicalHeaderKey("content-type")
-	headerContentLength       = http.CanonicalHeaderKey("content-length")
-	marshalError        error = errors.New("Marshaling error.")
-
 	textMimeTypes = map[string]string{
 		"css":    "text/css; charset=utf-8",
 		"html":   "text/html; charset=utf-8",
@@ -94,6 +65,8 @@ var (
 		"txt":    "text/plain; charset=utf-8",
 		"txt16l": "text/plain; charset=utf-16le",
 		"txt16b": "text/plain; charset=utf-16be"}
+	invalidQueryString = errors.New("Invalid querystring.")
+	invalidPath        = errors.New("Invalid path.")
 )
 
 func replaceMode(n, m os.FileMode) os.FileMode {
@@ -113,7 +86,7 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 			if owner, err := user.LookupId(strconv.FormatUint(uint64(sstat.Uid), 10)); err == nil {
 				m["user"] = owner.Username
 			}
-			if grp, err := util.LookupGroupById(sstat.Gid); err == nil {
+			if grp, err := share.LookupGroupById(sstat.Gid); err == nil {
 				m["group"] = grp.Name
 			}
 			m["accessTime"] = sstat.Atim.Sec
@@ -155,20 +128,6 @@ func isOwner(u *user.User, fi os.FileInfo) (bool, error) {
 	return strconv.FormatUint(uint64(sstat.Uid), 10) == u.Uid, nil
 }
 
-func writeJsonResponse(w http.ResponseWriter, r *http.Request, d interface{}) (int, error) {
-	js, err := json.Marshal(d)
-	if err != nil {
-		return 0, marshalError
-	}
-	h := w.Header()
-	h.Set(headerContentType, jsonContentType)
-	h.Set(headerContentLength, fmt.Sprintf("%d", len(js)))
-	if r.Method == "HEAD" {
-		return 0, nil
-	}
-	return w.Write(js)
-}
-
 func detectContentType(name string, f *os.File) (ct string, err error) {
 	ct = mime.TypeByExtension(filepath.Ext(name))
 	if len(ct) > 0 {
@@ -199,7 +158,7 @@ func searchFiles(dirs []*fileInfo, max int, qry func(fi *fileInfo) bool) []*file
 		if err != nil {
 			return
 		}
-		defer util.Doretlog42(d.Close)
+		defer share.Doretlog42(d.Close)
 		fis, err := d.Readdir(0)
 		if err != nil {
 			return
@@ -233,7 +192,7 @@ func copyTree(from, to string) error {
 	if err != nil {
 		return err
 	}
-	defer util.Doretlog42(ff.Close)
+	defer share.Doretlog42(ff.Close)
 	if fi.IsDir() {
 		err = os.Mkdir(to, os.ModePerm)
 		if err != nil {
@@ -254,7 +213,7 @@ func copyTree(from, to string) error {
 		if err != nil {
 			return err
 		}
-		defer util.Doretlog42(tf.Close)
+		defer share.Doretlog42(tf.Close)
 		_, err = io.Copy(tf, ff)
 		if err != nil {
 			return err
@@ -269,7 +228,7 @@ func getQryNum(qry url.Values, key string) (int, error) {
 		return 0, nil
 	}
 	if len(ns) != 1 {
-		return 0, errors.New("Invalid querystring.")
+		return 0, invalidQueryString
 	}
 	return strconv.Atoi(ns[0])
 }
@@ -277,7 +236,7 @@ func getQryNum(qry url.Values, key string) (int, error) {
 func getQryExpression(qry url.Values, key string) (*regexp.Regexp, error) {
 	exprs := qry[key]
 	if len(exprs) > 1 {
-		return nil, errors.New("Invalid querystring.")
+		return nil, invalidQueryString
 	}
 	if len(exprs) == 0 {
 		return nil, nil
@@ -293,33 +252,33 @@ func (h *handler) getPath(sp string) (string, error) {
 	p := path.Join(h.dn, sp)
 	i := pathIntersect(h.dn, p)
 	if i < 2 {
-		return "", errors.New("Invalid path.")
+		return "", invalidPath
 	}
 	return p, nil
 }
 
 func (h *handler) searchf(w http.ResponseWriter, r *http.Request, qry url.Values) {
 	p, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	max, err := getQryNum(qry, searchQueryMax)
-	if !util.CheckBadReq(w, err == nil) {
+	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
 	if max <= 0 || max > h.maxSearchResults {
 		max = h.maxSearchResults
 	}
 	rxn, err := getQryExpression(qry, searchQueryName)
-	if !util.CheckBadReq(w, err == nil) {
+	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
 	rxc, err := getQryExpression(qry, searchQueryContent)
-	if !util.CheckBadReq(w, err == nil) {
+	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
 	di, err := os.Lstat(p)
-	if !util.CheckOsError(w, err) {
+	if !share.CheckOsError(w, err) {
 		return
 	}
 	result := searchFiles([]*fileInfo{&fileInfo{sys: di, dirname: path.Dir(p)}}, max, func(fi *fileInfo) bool {
@@ -334,7 +293,7 @@ func (h *handler) searchf(w http.ResponseWriter, r *http.Request, qry url.Values
 			if err != nil {
 				return false
 			}
-			defer util.Doretlog42(f.Close)
+			defer share.Doretlog42(f.Close)
 			ct, err := detectContentType(fi.Name(), f)
 			if err != nil {
 				return false
@@ -356,45 +315,37 @@ func (h *handler) searchf(w http.ResponseWriter, r *http.Request, qry url.Values
 	for i, fi := range result {
 		pmaps[i] = toPropertyMap(fi, false)
 	}
-	_, err = writeJsonResponse(w, r, pmaps)
-	util.CheckServerError(w, err != marshalError)
+	_, err = share.WriteJsonResponse(w, r, pmaps)
+	share.CheckServerError(w, err != share.MarshalError)
 }
 
 func (h *handler) propsf(w http.ResponseWriter, r *http.Request) {
 	p, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	fi, err := os.Lstat(p)
-	if !util.CheckOsError(w, err) {
+	if !share.CheckOsError(w, err) {
 		return
 	}
 	u, err := user.Current()
-	if !util.CheckServerError(w, u != nil && err == nil) {
+	if !share.CheckServerError(w, u != nil && err == nil) {
 		return
 	}
 	own, err := isOwner(u, fi)
-	if !util.CheckServerError(w, err == nil) {
+	if !share.CheckServerError(w, err == nil) {
 		return
 	}
 	pr := toPropertyMap(fi, own)
-	_, err = writeJsonResponse(w, r, pr)
-	util.CheckServerError(w, err != marshalError)
+	_, err = share.WriteJsonResponse(w, r, pr)
+	share.CheckServerError(w, err != share.MarshalError)
 }
 
 func (h *handler) modpropsf(w http.ResponseWriter, r *http.Request) {
-	mr := &maxReader{reader: r.Body, count: h.maxRequestBody}
-	dec := json.NewDecoder(mr)
-	dec.UseNumber()
 	var m map[string]interface{}
-	err := dec.Decode(&m)
-	if !util.CheckHandle(w, err == io.EOF || mr.count > 0, http.StatusRequestEntityTooLarge) ||
-		!util.CheckBadReq(w, err == io.EOF || err == nil) {
-		return
-	}
-	buf := dec.Buffered()
-	n, _ := buf.Read(make([]byte, 1))
-	if !util.CheckBadReq(w, n == 0) {
+	err := share.ReadJsonRequest(r, &m, h.maxRequestBody)
+	if !share.CheckHandle(w, err != share.RequestBodyTooLarge, http.StatusRequestEntityTooLarge) ||
+		!share.CheckBadReq(w, err == nil) {
 		return
 	}
 
@@ -405,46 +356,46 @@ func (h *handler) modpropsf(w http.ResponseWriter, r *http.Request) {
 		switch k {
 		case "mode":
 			n, ok := v.(json.Number)
-			if !util.CheckBadReq(w, ok) {
+			if !share.CheckBadReq(w, ok) {
 				return
 			}
 			mode, err = n.Int64()
-			if !util.CheckBadReq(w, err == nil && mode >= 0) {
+			if !share.CheckBadReq(w, err == nil && mode >= 0) {
 				return
 			}
 		case "owner":
 			var ok bool
 			owner, ok = v.(string)
-			if !util.CheckBadReq(w, ok) {
+			if !share.CheckBadReq(w, ok) {
 				return
 			}
 		case "group":
 			var ok bool
 			group, ok = v.(string)
-			if !util.CheckBadReq(w, ok) {
+			if !share.CheckBadReq(w, ok) {
 				return
 			}
 		default:
-			util.ErrorResponse(w, http.StatusBadRequest)
+			share.ErrorResponse(w, http.StatusBadRequest)
 			return
 		}
 	}
 
 	p, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	fi, err := os.Lstat(p)
-	if !util.CheckOsError(w, err) {
+	if !share.CheckOsError(w, err) {
 		return
 	}
 
 	u, err := user.Current()
-	if !util.CheckServerError(w, u != nil && err == nil) {
+	if !share.CheckServerError(w, u != nil && err == nil) {
 		return
 	}
 	own, err := isOwner(u, fi)
-	if !util.CheckServerError(w, err == nil) || !util.CheckHandle(w, own, http.StatusNotFound) {
+	if !share.CheckServerError(w, err == nil) || !share.CheckHandle(w, own, http.StatusNotFound) {
 		return
 	}
 
@@ -454,19 +405,19 @@ func (h *handler) modpropsf(w http.ResponseWriter, r *http.Request) {
 	)
 	if len(owner) > 0 {
 		usr, err := user.Lookup(owner)
-		if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+		if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 			return
 		}
 		puid, err := strconv.ParseUint(usr.Uid, 10, 32)
-		if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+		if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 			return
 		}
 		upuid := uint32(puid)
 		uid = &upuid
 	}
 	if len(group) > 0 {
-		grp, err := util.LookupGroupByName(group)
-		if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+		grp, err := share.LookupGroupByName(group)
+		if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 			return
 		}
 		gid = &grp.Id
@@ -476,14 +427,14 @@ func (h *handler) modpropsf(w http.ResponseWriter, r *http.Request) {
 		rmode := replaceMode(fi.Mode(), os.FileMode(mode))
 		if rmode != fi.Mode() {
 			err := os.Chmod(p, rmode)
-			if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+			if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 				return
 			}
 		}
 	}
 	if uid != nil || gid != nil {
 		sstat, ok := fi.Sys().(*syscall.Stat_t)
-		if !util.CheckHandle(w, ok, http.StatusNotFound) {
+		if !share.CheckHandle(w, ok, http.StatusNotFound) {
 			return
 		}
 		if uid == nil {
@@ -494,7 +445,7 @@ func (h *handler) modpropsf(w http.ResponseWriter, r *http.Request) {
 		}
 		if *uid != sstat.Uid || *gid != sstat.Gid {
 			err = os.Chown(p, int(*uid), int(*gid))
-			if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+			if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 				return
 			}
 		}
@@ -503,33 +454,33 @@ func (h *handler) modpropsf(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) getDir(w http.ResponseWriter, r *http.Request, d *os.File) {
 	dfis, err := d.Readdir(0)
-	if !util.CheckOsError(w, err) {
+	if !share.CheckOsError(w, err) {
 		return
 	}
 	u, err := user.Current()
-	if !util.CheckServerError(w, u != nil && err == nil) {
+	if !share.CheckServerError(w, u != nil && err == nil) {
 		return
 	}
 	prs := make([]map[string]interface{}, len(dfis))
 	for i, dfi := range dfis {
 		own, err := isOwner(u, dfi)
-		if !util.CheckServerError(w, err == nil) {
+		if !share.CheckServerError(w, err == nil) {
 			return
 		}
 		prs[i] = toPropertyMap(dfi, own)
 	}
-	_, err = writeJsonResponse(w, r, prs)
-	util.CheckServerError(w, err != marshalError)
+	_, err = share.WriteJsonResponse(w, r, prs)
+	share.CheckServerError(w, err != share.MarshalError)
 }
 
 func (h *handler) getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi os.FileInfo) {
 	ct, err := detectContentType(fi.Name(), f)
-	if !util.CheckServerError(w, err == nil) {
+	if !share.CheckServerError(w, err == nil) {
 		return
 	}
 	header := w.Header()
-	header.Set(headerContentType, ct)
-	header.Set(headerContentLength, fmt.Sprintf("%d", fi.Size()))
+	header.Set(share.HeaderContentType, ct)
+	header.Set(share.HeaderContentLength, fmt.Sprintf("%d", fi.Size()))
 	if r.Method == "HEAD" {
 		return
 	}
@@ -539,46 +490,46 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi
 
 func (h *handler) putf(w http.ResponseWriter, r *http.Request) {
 	p, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	err = os.MkdirAll(path.Dir(p), os.ModePerm)
-	if !util.CheckOsError(w, err) {
+	if !share.CheckOsError(w, err) {
 		return
 	}
 	f, err := os.Create(p)
-	if !util.CheckOsError(w, err) {
+	if !share.CheckOsError(w, err) {
 		return
 	}
-	defer util.Doretlog42(f.Close)
-	if !util.CheckOsError(w, err) {
+	defer share.Doretlog42(f.Close)
+	if !share.CheckOsError(w, err) {
 		return
 	}
-	mr := &maxReader{reader: r.Body, count: h.maxRequestBody}
+	mr := &share.MaxReader{Reader: r.Body, Count: h.maxRequestBody}
 	_, err = io.Copy(f, mr)
-	if util.CheckHandle(w, err == io.EOF || mr.count > 0, http.StatusRequestEntityTooLarge) {
-		util.CheckOsError(w, err)
+	if share.CheckHandle(w, err == io.EOF || mr.Count > 0, http.StatusRequestEntityTooLarge) {
+		share.CheckOsError(w, err)
 	}
 }
 
 func (h *handler) copyRename(w http.ResponseWriter, r *http.Request,
 	qry url.Values, multi bool, f func(string, string) error) {
 	tos, ok := qry[copyRenameToKey]
-	if !util.CheckBadReq(w, ok && (multi || len(tos) == 1)) {
+	if !share.CheckBadReq(w, ok && (multi || len(tos) == 1)) {
 		return
 	}
 	from, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	for _, to := range tos {
 		to, err := h.getPath(to)
-		if !util.CheckHandle(w, err == nil, http.StatusNotFound) ||
-			!util.CheckBadReq(w, pathIntersect(from, to) == 0) {
+		if !share.CheckHandle(w, err == nil, http.StatusNotFound) ||
+			!share.CheckBadReq(w, pathIntersect(from, to) == 0) {
 			return
 		}
 		err = f(from, to)
-		if !util.CheckOsError(w, err) {
+		if !share.CheckOsError(w, err) {
 			return
 		}
 	}
@@ -594,27 +545,27 @@ func (h *handler) renamef(w http.ResponseWriter, r *http.Request, qry url.Values
 
 func (h *handler) deletef(w http.ResponseWriter, r *http.Request) {
 	p, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	err = os.RemoveAll(p)
 	if os.IsNotExist(err) {
 		return
 	}
-	util.CheckOsError(w, err)
+	share.CheckOsError(w, err)
 }
 
 func (h *handler) mkdirf(w http.ResponseWriter, r *http.Request) {
 	p, err := h.getPath(r.URL.Path)
-	if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+	if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 		return
 	}
 	err = os.MkdirAll(p, os.ModePerm)
-	util.CheckOsError(w, err)
+	share.CheckOsError(w, err)
 }
 
 func noCmd(w http.ResponseWriter, r *http.Request, f http.HandlerFunc) {
-	_, ok := util.CheckQryCmd(w, r)
+	_, ok := share.CheckQryCmd(w, r)
 	if !ok {
 		return
 	}
@@ -625,10 +576,10 @@ func noCmd(w http.ResponseWriter, r *http.Request, f http.HandlerFunc) {
 
 func queryNoCmd(w http.ResponseWriter, r *http.Request, f queryHandler) {
 	qry, err := url.ParseQuery(r.URL.RawQuery)
-	if !util.CheckBadReq(w, err == nil) {
+	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
-	if _, ok := util.CheckQryValuesCmd(w, qry); !ok {
+	if _, ok := share.CheckQryValuesCmd(w, qry); !ok {
 		return
 	}
 	if f != nil {
@@ -671,30 +622,30 @@ func (h *handler) rename(w http.ResponseWriter, r *http.Request)   { queryNoCmd(
 
 func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 	qry, err := url.ParseQuery(r.URL.RawQuery)
-	if !util.CheckBadReq(w, err == nil) {
+	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
-	cmd, ok := util.CheckQryValuesCmd(w, qry, cmdProps, cmdSearch)
+	cmd, ok := share.CheckQryValuesCmd(w, qry, share.CmdProps, share.CmdSearch)
 	if !ok {
 		return
 	}
 	switch cmd {
-	case cmdProps:
+	case share.CmdProps:
 		h.propsf(w, r)
-	case cmdSearch:
+	case share.CmdSearch:
 		h.searchf(w, r, qry)
 	default:
 		p, err := h.getPath(r.URL.Path)
-		if !util.CheckHandle(w, err == nil, http.StatusNotFound) {
+		if !share.CheckHandle(w, err == nil, http.StatusNotFound) {
 			return
 		}
 		f, err := os.Open(p)
-		if !util.CheckOsError(w, err) {
+		if !share.CheckOsError(w, err) {
 			return
 		}
-		defer util.Doretlog42(f.Close)
+		defer share.Doretlog42(f.Close)
 		fi, err := f.Stat()
-		if !util.CheckOsError(w, err) {
+		if !share.CheckOsError(w, err) {
 			return
 		}
 		if fi.IsDir() {
@@ -708,23 +659,24 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) post(w http.ResponseWriter, r *http.Request) {
 	qry, err := url.ParseQuery(r.URL.RawQuery)
-	if !util.CheckBadReq(w, err == nil) {
+	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
-	cmd, ok := util.CheckQryValuesCmd(w, qry, cmdModprops, cmdDelete, cmdMkdir, cmdCopy, cmdRename)
+	cmd, ok := share.CheckQryValuesCmd(w, qry,
+		share.CmdModprops, share.CmdDelete, share.CmdMkdir, share.CmdCopy, share.CmdRename)
 	if !ok {
 		return
 	}
 	switch cmd {
-	case cmdModprops:
+	case share.CmdModprops:
 		h.modpropsf(w, r)
-	case cmdDelete:
+	case share.CmdDelete:
 		h.deletef(w, r)
-	case cmdMkdir:
+	case share.CmdMkdir:
 		h.mkdirf(w, r)
-	case cmdCopy:
+	case share.CmdCopy:
 		h.copyf(w, r, qry)
-	case cmdRename:
+	case share.CmdRename:
 		h.renamef(w, r, qry)
 	default:
 		h.putf(w, r)
@@ -732,7 +684,9 @@ func (h *handler) post(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// todo: document that the accept headers are simply ignored
+	// todo:
+	// - document that the accept headers are simply ignored
+	// - document that the content-type for json requests is simply ignored
 	switch r.Method {
 	case "OPTIONS":
 		h.options(w, r)
@@ -759,6 +713,6 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		h.post(w, r)
 	default:
-		util.ErrorResponse(w, http.StatusMethodNotAllowed)
+		share.ErrorResponse(w, http.StatusMethodNotAllowed)
 	}
 }

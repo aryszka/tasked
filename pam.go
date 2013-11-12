@@ -1,9 +1,9 @@
 package main
 
 import (
-	"errors"
 	pam "code.google.com/p/gopam"
 	"code.google.com/p/tasked/auth"
+	"errors"
 	"io/ioutil"
 )
 

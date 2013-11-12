@@ -1,11 +1,11 @@
 package main
 
 import (
-	"code.google.com/p/tasked/util"
+	"code.google.com/p/tasked/share"
+	tst "code.google.com/p/tasked/testing"
 	"os"
 	"path"
 	"testing"
-	tst "code.google.com/p/tasked/testing"
 )
 
 func TestGetConfigPath(t *testing.T) {
@@ -18,9 +18,9 @@ func TestGetConfigPath(t *testing.T) {
 	})
 	tst.ErrFatal(t, err)
 	homeConfig := path.Join(os.Getenv("HOME"), defaultConfigBaseName)
-	homeConfigExists, err := util.CheckPath(homeConfig, false)
+	homeConfigExists, err := share.CheckPath(homeConfig, false)
 	tst.ErrFatal(t, err)
-	sysConfigExists, err := util.CheckPath(sysConfig, false)
+	sysConfigExists, err := share.CheckPath(sysConfig, false)
 	tst.ErrFatal(t, err)
 	err = tst.WithEnv(configEnvKey, "", func() error {
 		p, err := getConfigPath()
@@ -102,7 +102,7 @@ func TestReadConfig(t *testing.T) {
 }
 
 func TestReadConfigNotRoot(t *testing.T) {
-	if util.IsRoot {
+	if share.IsRoot {
 		t.Skip()
 	}
 	var s settings

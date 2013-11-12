@@ -1,9 +1,9 @@
-package util
+package share
 
 import (
+	"fmt"
 	"os"
 	"path"
-	"fmt"
 )
 
 func Abspath(p, dir string) string {
