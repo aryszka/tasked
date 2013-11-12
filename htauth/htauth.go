@@ -4,7 +4,6 @@ import (
 	"code.google.com/p/tasked/share"
 	"encoding/base64"
 	"errors"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"strings"
@@ -14,17 +13,14 @@ const (
 	credXHeaderUserKey    = "X-Auth-Username"
 	credXHeaderPwdKey     = "X-Auth-Password"
 	credXHeaderTokenKey   = "X-Auth-Token"
-	credHeaderKey         = "Authorization"
+	credHeaderUserKey         = "Authorization"
 	tokenCookieName       = "tasked-auth"
 	basicAuthType         = "Basic"
 	userKey               = "username"
 	pwdKey                = "password"
 	tokenKey              = "token"
 	defaultMaxRequestBody = int64(10 << 20)
-	mimeForm              = "application/x-www-form-urlencoded"
-	mimeMForm             = "multipart/form-data"
 	mimeJson              = "application/json"
-	mimeText              = "text/plain"
 )
 
 var (
@@ -151,11 +147,11 @@ func getCredsXHeaderUser(r *http.Request) (string, string, error) {
 	return user, pwd, err
 }
 
-func getCredsHeader(r *http.Request) (string, string, error) {
-	if _, ok := r.Header[credHeaderKey]; !ok {
+func getCredsHeaderUser(r *http.Request) (string, string, error) {
+	if _, ok := r.Header[credHeaderUserKey]; !ok {
 		return "", "", nil
 	}
-	h, err := getOneOrZero(r.Header, credHeaderKey)
+	h, err := getOneOrZero(r.Header, credHeaderUserKey)
 	if err != nil {
 		return "", "", err
 	}
@@ -205,44 +201,6 @@ func getCredsCookie(r *http.Request) (Token, error) {
 	return newTokenString(tc.Value)
 }
 
-func getCredsForm(r *http.Request) (string, string, Token, error) {
-	var (
-		user, pwd, ts string
-		t             Token
-		err           error
-	)
-
-	// try parse the form even if it's a GET request
-	err = func() error {
-		m := r.Method
-		r.Method = "POST"
-		defer func() {
-			r.Method = m
-		}()
-		return r.ParseMultipartForm(maxRequestBody)
-	}()
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	user, err = getOneOrZero(r.PostForm, userKey)
-	if err != nil {
-		return "", "", nil, err
-	}
-	pwd, err = getOneOrZero(r.PostForm, pwdKey)
-	if err != nil {
-		return "", "", nil, err
-	}
-	ts, err = getOneOrZero(r.PostForm, tokenKey)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if len(ts) > 0 {
-		t, err = newTokenString(ts)
-	}
-	return user, pwd, t, err
-}
-
 func getCredsJson(r *http.Request) (string, string, Token, error) {
 	var (
 		user, pwd, ts string
@@ -270,33 +228,28 @@ func getCredsJson(r *http.Request) (string, string, Token, error) {
 	return user, pwd, t, err
 }
 
-func getCredsText(r *http.Request) (Token, error) {
-	tb, err := ioutil.ReadAll(r.Body)
-	if err != nil || len(tb) == 0 {
-		return nil, err
-	}
-	return newTokenString(string(tb))
-}
-
-func getCredsHeaderToken(r *http.Request) (Token, error) {
-	t, err := getCredsXHeaderToken(r)
-	if err == nil && t == nil {
-		t, err = getCredsCookie(r)
-	}
-	return t, err
-}
-
 func getCreds(r *http.Request, isAuth bool) (string, string, Token, error) {
 	user, pwd, err := getCredsXHeaderUser(r)
 	if err != nil || len(user) > 0 {
 		return user, pwd, nil, err
 	}
-	user, pwd, err = getCredsHeader(r)
+
+	user, pwd, err = getCredsHeaderUser(r)
 	if err != nil || len(user) > 0 {
 		return user, pwd, nil, err
 	}
+
 	if !isAuth {
-		t, err := getCredsHeaderToken(r)
+		t, err := getCredsXHeaderToken(r)
+		if err != nil || t != nil {
+			return "", "", t, err
+		}
+		t, err = getCredsCookie(r)
+		return "", "", t, err
+	}
+
+	t, err := getCredsXHeaderToken(r)
+	if err != nil || t != nil {
 		return "", "", t, err
 	}
 
@@ -309,26 +262,13 @@ func getCreds(r *http.Request, isAuth bool) (string, string, Token, error) {
 			return "", "", nil, err
 		}
 	}
-	var bt Token
-	switch ct {
-	case mimeForm, mimeMForm:
-		user, pwd, bt, err = getCredsForm(r)
-	case mimeJson:
-		user, pwd, bt, err = getCredsJson(r)
+	if ct == mimeJson {
+		user, pwd, t, err = getCredsJson(r)
 	}
-	if err != nil || len(user) > 0 {
-		return user, pwd, nil, err
+	if err != nil || len(user) > 0 || t != nil {
+		return user, pwd, t, err
 	}
 
-	t, err := getCredsHeaderToken(r)
-	if err != nil || t != nil {
-		return "", "", t, err
-	}
-	if bt != nil {
-		return "", "", bt, nil
-	}
-	if ct == mimeText {
-		t, err = getCredsText(r)
-	}
+	t, err = getCredsCookie(r)
 	return "", "", t, err
 }
