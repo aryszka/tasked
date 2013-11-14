@@ -14,7 +14,7 @@ func Abspath(p, dir string) string {
 }
 
 func AbspathNotEmpty(p, dir string) string {
-	if len(p) == 0 {
+	if p == "" {
 		return p
 	}
 	return Abspath(p, dir)

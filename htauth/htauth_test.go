@@ -8,7 +8,46 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"errors"
+	"io/ioutil"
 )
+
+var authError = errors.New("auth error")
+
+type auth int
+
+func (a *auth) AuthPwd(user, pwd string) (Token, error) {
+	if user == pwd {
+		return &token{val: []byte("123")}, nil
+	}
+	if user == "" {
+		return nil, nil
+	}
+	return nil, authError
+}
+
+func (a *auth) AuthToken(t Token) (Token, error) {
+	if t == nil {
+		return nil, nil
+	}
+	if bytes.Equal(t.Value(), []byte("123")) {
+		return t, nil
+	}
+	if bytes.Equal(t.Value(), []byte("456")) {
+		return &token{val: []byte("123")}, nil
+	}
+	return nil, authError
+}
+
+func (a *auth) GetUser(t Token) (string, error) {
+	if t == nil {
+		return "", nil
+	}
+	if bytes.Equal(t.Value(), []byte("123")) || bytes.Equal(t.Value(), []byte("456")) {
+		return "123", nil
+	}
+	return "", authError
+}
 
 func TestNewTokenString(t *testing.T) {
 	tk, err := newTokenString("")
@@ -228,14 +267,6 @@ func TestGetCredsHeaderUser(t *testing.T) {
 	})
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
-	r.Header.Add(credHeaderUserKey, basicAuthType+" notbase64")
-	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err == nil {
-			t.Fail()
-		}
-	})
-	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
-	tst.ErrFatal(t, err)
 	r.Header.Add(credHeaderUserKey, basicAuthType+" "+invalidEnced)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
 		if err != invalidHeader {
@@ -278,7 +309,7 @@ func TestGetCredsHeaderUser(t *testing.T) {
 
 func TestGetCredsXHeaderToken(t *testing.T) {
 	var (
-		tk    Token
+		tk    string
 		err   error
 		r     *http.Request
 		valid = base64.StdEncoding.EncodeToString([]byte("some"))
@@ -290,7 +321,7 @@ func TestGetCredsXHeaderToken(t *testing.T) {
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || tk != nil {
+		if err != nil || tk != "" {
 			t.Fail()
 		}
 	})
@@ -315,7 +346,7 @@ func TestGetCredsXHeaderToken(t *testing.T) {
 	tst.ErrFatal(t, err)
 	r.Header.Add(credXHeaderTokenKey, valid)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || tk == nil {
+		if err != nil || tk == "" {
 			t.Fail()
 		}
 	})
@@ -323,12 +354,11 @@ func TestGetCredsXHeaderToken(t *testing.T) {
 
 func TestGetCredsCookie(t *testing.T) {
 	var (
-		tk      Token
+		tk      string
 		err     error
 		r       *http.Request
 		v       = []byte("some")
 		valid   = base64.StdEncoding.EncodeToString(v)
-		invalid = "not+base64"
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
 		tk, err = getCredsCookie(r)
@@ -337,7 +367,7 @@ func TestGetCredsCookie(t *testing.T) {
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || tk != nil {
+		if err != nil || tk != "" {
 			t.Fail()
 		}
 	})
@@ -352,18 +382,9 @@ func TestGetCredsCookie(t *testing.T) {
 	})
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
-	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: invalid})
-	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err == nil {
-			t.Log("here")
-			t.Fail()
-		}
-	})
-	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
-	tst.ErrFatal(t, err)
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: valid})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || !bytes.Equal(tk.Value(), v) {
+		if err != nil || tk != valid {
 			t.Fail()
 		}
 	})
@@ -372,13 +393,12 @@ func TestGetCredsCookie(t *testing.T) {
 func TestGetCredsJson(t *testing.T) {
 	var (
 		user, pwd string
-		tk        Token
+		tk        string
 		err       error
 		tuser     = "user"
 		tpwd      = "pwd"
 		bValid    = []byte("some")
 		tkValid   = base64.StdEncoding.EncodeToString(bValid)
-		tkInvalid = "not+base64"
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
 		user, pwd, tk, err = getCredsJson(r)
@@ -398,7 +418,7 @@ func TestGetCredsJson(t *testing.T) {
 			})
 	}()
 	tst.Htreq(t, "AUTH", tst.S.URL, nil, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || len(pwd) != 0 || tk != nil {
+		if err != nil || len(user) != 0 || len(pwd) != 0 || tk != "" {
 			t.Fail()
 		}
 	})
@@ -431,16 +451,9 @@ func TestGetCredsJson(t *testing.T) {
 			}
 		})
 	tst.Htreq(t, "AUTH", tst.S.URL,
-		bytes.NewBufferString(fmt.Sprintf("{\"%s\":\"%s\"}", tokenKey, tkInvalid)),
-		func(rsp *http.Response) {
-			if err == nil {
-				t.Fail()
-			}
-		})
-	tst.Htreq(t, "AUTH", tst.S.URL,
 		bytes.NewBufferString(fmt.Sprintf("{\"%s\":\"%s\"}", tokenKey, tkValid)),
 		func(rsp *http.Response) {
-			if err != nil || !bytes.Equal(tk.Value(), bValid) {
+			if err != nil || tk != tkValid {
 				t.Fail()
 			}
 		})
@@ -448,7 +461,7 @@ func TestGetCredsJson(t *testing.T) {
 		bytes.NewBufferString(fmt.Sprintf("{\"%s\":\"%s\",\"%s\":\"%s\",\"%s\":\"%s\"}",
 			userKey, tuser, pwdKey, tpwd, tokenKey, tkValid)),
 		func(rsp *http.Response) {
-			if err != nil || user != tuser || pwd != tpwd || !bytes.Equal(tk.Value(), bValid) {
+			if err != nil || user != tuser || pwd != tpwd || tk != tkValid {
 				t.Fail()
 			}
 		})
@@ -458,19 +471,19 @@ func TestGetCredsValidation(t *testing.T) {
 	var (
 		isAuth       bool
 		user, pwd    string
-		tk           Token
+		tk           string
 		err          error
 		r            *http.Request
 		tuser        = "user"
 		tpwd         = "pwd"
-		notbase64    = "not+base64"
 		val          = []byte(tuser + ":" + tpwd)
 		enced        = base64.StdEncoding.EncodeToString(val)
 		invalidEnced = base64.StdEncoding.EncodeToString([]byte(tuser + "-" + tpwd))
 		valid        = basicAuthType + " " + enced
+		a = &filter{allowCookies: true}
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
-		user, pwd, tk, err = getCreds(r, isAuth)
+		user, pwd, tk, err = a.getCreds(r, isAuth)
 	}
 
 	isAuth = false
@@ -509,24 +522,35 @@ func TestGetCredsValidation(t *testing.T) {
 	})
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
-	r.Header.Set(credXHeaderTokenKey, notbase64)
-	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err == nil {
-			t.Fail()
-		}
-	})
-	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
-	tst.ErrFatal(t, err)
 	r.Header.Set(credXHeaderTokenKey, enced)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || !bytes.Equal(tk.Value(), val) {
+		if err != nil || tk != enced {
+			t.Fail()
+		}
+	})
+	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
+	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
+	tst.Htreqr(t, r, func(rsp *http.Response) {
+		if err == nil {
+			t.Log("here")
+			t.Fail()
+		}
+	})
+	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
+	tst.Htreqr(t, r, func(rsp *http.Response) {
+		if err != nil || tk != enced {
+			t.Log("here")
 			t.Fail()
 		}
 	})
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk != nil {
+		if err != nil || user != "" || tk != "" {
 			t.Fail()
 		}
 	})
@@ -561,17 +585,9 @@ func TestGetCredsValidation(t *testing.T) {
 	})
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
-	r.Header.Set(credXHeaderTokenKey, notbase64)
-	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err == nil {
-			t.Fail()
-		}
-	})
-	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
-	tst.ErrFatal(t, err)
 	r.Header.Set(credXHeaderTokenKey, enced)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || !bytes.Equal(tk.Value(), val) {
+		if err != nil || tk != enced {
 			t.Fail()
 		}
 	})
@@ -580,14 +596,33 @@ func TestGetCredsValidation(t *testing.T) {
 	tst.ErrFatal(t, err)
 	r.Header.Add(share.HeaderContentType, mimeJson)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || tk == nil || !bytes.Equal(tk.Value(), val) {
+		if err != nil || tk == "" || tk != enced {
 			t.Fail()
 		}
 	})
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk != nil {
+		if err != nil || len(user) != 0 || tk != "" {
+			t.Fail()
+		}
+	})
+	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
+	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
+	tst.Htreqr(t, r, func(rsp *http.Response) {
+		if err == nil {
+			t.Log("here")
+			t.Fail()
+		}
+	})
+	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
+	tst.Htreqr(t, r, func(rsp *http.Response) {
+		if err != nil || tk != enced {
+			t.Log("here")
 			t.Fail()
 		}
 	})
@@ -597,7 +632,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	var (
 		isAuth    bool
 		user, pwd string
-		tk        Token
+		tk        string
 		err       error
 		r         *http.Request
 		userxh    = "userxh"
@@ -614,9 +649,10 @@ func TestGetCredsPrecedence(t *testing.T) {
 		encedj    = base64.StdEncoding.EncodeToString(tj)
 		validh    = basicAuthType + " " + encedh
 		encedc    = base64.StdEncoding.EncodeToString(tc)
+		a = &filter{allowCookies: true}
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
-		user, pwd, tk, err = getCreds(r, isAuth)
+		user, pwd, tk, err = a.getCreds(r, isAuth)
 	}
 
 	isAuth = false
@@ -662,7 +698,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r.Header.Set(credXHeaderTokenKey, encedx)
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: encedc})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk == nil || !bytes.Equal(tk.Value(), txh) {
+		if err != nil || len(user) != 0 || tk == "" || tk != encedx {
 			t.Fail()
 		}
 	})
@@ -675,7 +711,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r.Header.Add(share.HeaderContentType, mimeJson)
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: encedc})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk == nil || !bytes.Equal(tk.Value(), tc) {
+		if err != nil || len(user) != 0 || tk == "" || tk != encedc {
 			t.Fail()
 		}
 	})
@@ -687,7 +723,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	tst.ErrFatal(t, err)
 	r.Header.Add(share.HeaderContentType, mimeJson)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk != nil {
+		if err != nil || user != "" || tk != "" {
 			t.Fail()
 		}
 	})
@@ -735,7 +771,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r.Header.Set(credXHeaderTokenKey, encedx)
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: encedc})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk == nil || !bytes.Equal(tk.Value(), txh) {
+		if err != nil || user != "" || tk == "" || tk != encedx {
 			t.Fail()
 		}
 	})
@@ -761,7 +797,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r.Header.Add(share.HeaderContentType, mimeJson)
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: encedc})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk == nil || !bytes.Equal(tk.Value(), tj) {
+		if err != nil || user != "" || tk == "" || tk != encedj {
 			t.Fail()
 		}
 	})
@@ -772,7 +808,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r.Header.Add(share.HeaderContentType, mimeJson)
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: encedc})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk == nil || !bytes.Equal(tk.Value(), tc) {
+		if err != nil || user != "" || tk == "" || tk != encedc {
 			t.Fail()
 		}
 	})
@@ -781,7 +817,230 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r, err = http.NewRequest("AUTH", tst.S.URL, nil)
 	tst.ErrFatal(t, err)
 	tst.Htreqr(t, r, func(rsp *http.Response) {
-		if err != nil || len(user) != 0 || tk != nil {
+		if err != nil || user != "" || tk != "" {
+			t.Fail()
+		}
+	})
+}
+
+func TestCheckCreds(t *testing.T) {
+	a := &filter{auth: new(auth)}
+
+	tk, err := a.checkCreds("123", "123", nil)
+	if err != nil || tk == nil {
+		t.Fail()
+	}
+
+	tk, err = a.checkCreds("123", "456", nil)
+	if err == nil {
+		t.Fail()
+	}
+
+	tk, err = a.checkCreds("", "", &token{val: []byte("123")})
+	if err != nil || tk == nil || !bytes.Equal(tk.Value(), []byte("123")) {
+		t.Fail()
+	}
+
+	tk, err = a.checkCreds("", "", &token{val: []byte("456")})
+	if err != nil || tk == nil || !bytes.Equal(tk.Value(), []byte("123")) {
+		t.Fail()
+	}
+
+	tk, err = a.checkCreds("", "", &token{val: []byte("789")})
+	if err == nil {
+		t.Fail()
+	}
+
+	tk, err = a.checkCreds("", "", nil)
+	if err != nil || tk != nil {
+		t.Fail()
+	}
+}
+
+func TestFilter(t *testing.T) {
+	var (
+		a = &filter{auth: new(auth)}
+		res interface{}
+		h bool
+		t123 = base64.StdEncoding.EncodeToString([]byte("123"))
+		t456 = base64.StdEncoding.EncodeToString([]byte("456"))
+	)
+	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
+		res, h = a.Filter(w, r, nil)
+	}
+
+	tst.Htreq(t, "OPTIONS", tst.S.URL, nil, func(rsp *http.Response) {
+		if res != nil || h {
+			t.Fail()
+		}
+	})
+
+	tst.Htreq(t, "HEAD", tst.S.URL, nil, func(rsp *http.Response) {
+		if res != nil || h {
+			t.Fail()
+		}
+	})
+
+	tst.Htreq(t, "AUTH", tst.S.URL + "?cmd=some", nil, func(rsp *http.Response) {
+		if res != nil || !h || rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	rq, err := http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "user")
+	rq.Header.Add(credXHeaderUserKey, "user")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != nil || !h || rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderTokenKey, "not base64")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != nil || !h || rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "456")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != nil || h {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "456")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != nil || !h || rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderTokenKey, base64.StdEncoding.EncodeToString([]byte("789")))
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != nil || h {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderTokenKey, base64.StdEncoding.EncodeToString([]byte("789")))
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != nil || !h || rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderTokenKey, t123)
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		tks := rsp.Header[credXHeaderTokenKey]
+		if len(tks) != 1 || tks[0] != t123 {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderTokenKey, t456)
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		tks := rsp.Header[credXHeaderTokenKey]
+		if len(tks) != 1 || tks[0] != t123 {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		tks := rsp.Header[credXHeaderTokenKey]
+		if len(tks) != 1 || tks[0] != t123 {
+			t.Fail()
+		}
+	})
+
+	a.allowCookies = false
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		tks := rsp.Header[credXHeaderTokenKey]
+		if len(tks) != 1 || tks[0] != t123 {
+			t.Fail()
+		}
+		for _, c := range rsp.Cookies() {
+			if c.Name == tokenCookieName && c.Value == t123 {
+				t.Fail()
+				break
+			}
+		}
+	})
+
+	a.allowCookies = true
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		tks := rsp.Header[credXHeaderTokenKey]
+		if len(tks) != 1 || tks[0] != t123 {
+			t.Fail()
+		}
+		var found bool
+		for _, c := range rsp.Cookies() {
+			if c.Name == tokenCookieName && c.Value == t123 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != "123" || h {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		tst.ErrFatal(t, err)
+		if len(b) > 0 {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Add(credXHeaderUserKey, "123")
+	rq.Header.Add(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if res != "123" || !h {
+			t.Fail()
+		}
+		b, err := ioutil.ReadAll(rsp.Body)
+		tst.ErrFatal(t, err)
+		if !bytes.Equal(b, []byte(t123)) {
 			t.Fail()
 		}
 	})

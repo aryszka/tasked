@@ -122,7 +122,7 @@ func init() {
 
 func envdef(key, dflt string) string {
 	val := os.Getenv(key)
-	if len(val) == 0 {
+	if val == "" {
 		return dflt
 	}
 	return val

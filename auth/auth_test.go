@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	tst "code.google.com/p/tasked/testing"
 )
 
 var testLong = false
@@ -38,7 +39,7 @@ func (t *testToken) Value() []byte { return t.val }
 
 func envdef(key, dflt string) string {
 	val := os.Getenv(key)
-	if len(val) == 0 {
+	if val == "" {
 		return dflt
 	}
 	return val
@@ -83,6 +84,12 @@ func (a *Type) pastRefresh() int64 {
 
 func (a *Type) pastInvalid() int64 {
 	return time.Now().Add(-a.tokenValidity).Unix()
+}
+
+func encryptf(t *testing.T, i *Type, tk *token) {
+	val, err := i.encrypt(*tk)
+	tst.ErrFatal(t, err)
+	tk.val = val
 }
 
 func TestTokenEncryptDecrypt(t *testing.T) {
@@ -174,6 +181,7 @@ func TestValidate(t *testing.T) {
 		t.Fail()
 	}
 	tk = token{user: "test", created: time.Now().Unix()}
+	encryptf(t, i, &tk)
 	tk.Value()
 	tback, err = i.validate(tk)
 	if err != nil || tback.user != tk.user || tback.created != tk.created ||
@@ -183,6 +191,7 @@ func TestValidate(t *testing.T) {
 
 	created := i.pastNoRefresh()
 	tk = token{created: created}
+	encryptf(t, i, &tk)
 	val := tk.Value()
 	tk, err = i.validate(tk)
 	nval := tk.val
@@ -198,7 +207,6 @@ func TestValidate(t *testing.T) {
 		t.Fatal()
 	}
 	tk.val = val
-	val = tk.Value()
 	tk, err = i.validate(tk)
 	if err != nil || tk.created <= created ||
 		bytes.Equal(val, tk.Value()) {
@@ -219,6 +227,7 @@ func TestValidateTime(t *testing.T) {
 	i := defaultInstance()
 	created := time.Now().Unix()
 	tk := token{created: created}
+	encryptf(t, i, &tk)
 	val := tk.Value()
 
 	time.Sleep(i.durNoRefresh())
@@ -226,20 +235,21 @@ func TestValidateTime(t *testing.T) {
 	nval := tk.val
 	if err != nil || tk.created != created ||
 		!bytes.Equal(val, tk.Value()) || !bytes.Equal(val, nval) {
+		t.Log("here 0")
 		t.Fail()
 	}
 
 	time.Sleep(i.renewThreshold)
 	tk, err = i.validate(tk)
-	nval = tk.val
 	if err != nil || tk.created <= created ||
-		nval != nil || bytes.Equal(val, tk.Value()) {
+		bytes.Equal(val, tk.Value()) {
 		t.Fail()
 	}
 
 	time.Sleep(i.tokenValidity)
 	_, err = i.validate(tk)
 	if err == nil || err != invalidToken {
+		t.Log("here 2")
 		t.Fail()
 	}
 }
@@ -296,12 +306,14 @@ func TestAuthToken(t *testing.T) {
 	i.iv = tiv
 
 	tk = &token{created: i.pastNoRefresh()}
+	encryptf(t, i, tk)
 	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
 	}
 
 	tk = &token{created: i.pastRefresh()}
+	encryptf(t, i, tk)
 	tback, err = i.AuthToken(tk)
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
 		t.Fail()
@@ -321,6 +333,7 @@ func TestAuthTokenTime(t *testing.T) {
 
 	i := defaultInstance()
 	tk := &token{created: time.Now().Unix()}
+	encryptf(t, i, tk)
 	time.Sleep(i.durNoRefresh())
 	tback, err := i.AuthToken(tk)
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
@@ -428,6 +441,7 @@ func TestAuthBytesTime(t *testing.T) {
 	i := defaultInstance()
 
 	tk := &token{created: time.Now().Unix()}
+	encryptf(t, i, tk)
 	time.Sleep(i.durNoRefresh())
 	tback, err := i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || !bytes.Equal(tback.Value(), tk.Value()) {
@@ -435,6 +449,7 @@ func TestAuthBytesTime(t *testing.T) {
 	}
 
 	tk = &token{created: time.Now().Unix()}
+	encryptf(t, i, tk)
 	time.Sleep(i.renewThreshold)
 	tback, err = i.AuthTokenBytes(tk.Value())
 	if err != nil || tback == nil || bytes.Equal(tback.Value(), tk.Value()) {
@@ -442,6 +457,7 @@ func TestAuthBytesTime(t *testing.T) {
 	}
 
 	tk = &token{created: time.Now().Unix()}
+	encryptf(t, i, tk)
 	time.Sleep(i.tokenValidity)
 	_, err = i.AuthTokenBytes(tk.Value())
 	if err == nil {

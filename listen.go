@@ -11,7 +11,7 @@ import (
 const noTlsWarning = "TLS has not been configured."
 
 func readKey(fn string) ([]byte, error) {
-	if len(fn) == 0 {
+	if fn == "" {
 		return nil, nil
 	}
 	key, err := ioutil.ReadFile(fn)
@@ -47,7 +47,7 @@ func getTcpSettings(s *settings) ([]byte, []byte, string, error) {
 	if len(tlsCert) == 0 {
 		tlsCert = []byte(defaultTlsCert)
 	}
-	if len(address) == 0 {
+	if address == "" {
 		address = defaultAddress
 	}
 	return tlsKey, tlsCert, address, nil

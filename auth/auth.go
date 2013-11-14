@@ -72,6 +72,41 @@ type Type struct {
 	checker PasswordChecker
 }
 
+// Initializes an authentication instance by setting the key and iv for AES, and setting the token expiration
+// interval. It expects an implementation of PasswordChecker, which will be used to check user credentials when
+// AuthPwd is called. The names of files containing the AES key and iv must be set. (The token expiration's
+// default is 90 days.)
+func New(c PasswordChecker, s Settings) (*Type, error) {
+	if c == nil {
+		return nil, noPasswordChecker
+	}
+	var (
+		i             Type
+		tokenValidity int
+	)
+	i.checker = c
+	if s != nil {
+		i.key = s.AesKey()
+		i.iv = s.AesIv()
+		tokenValidity = s.TokenValidity()
+	}
+	if len(i.key) == 0 || len(i.iv) == 0 {
+		log.Println("AES has not been configured.")
+	}
+	if len(i.key) == 0 {
+		i.key = make([]byte, aes.BlockSize)
+	}
+	if len(i.iv) == 0 {
+		i.iv = make([]byte, aes.BlockSize)
+	}
+	if tokenValidity == 0 {
+		tokenValidity = defaultTokenValidity
+	}
+	i.tokenValidity = time.Duration(tokenValidity) * time.Second
+	i.renewThreshold = time.Duration(float64(i.tokenValidity) * renewThresholdRate)
+	return &i, nil
+}
+
 func (a *Type) decryptToken(v []byte) (token, error) {
 	t := token{val: v}
 	b, err := a.crypt(v)
@@ -117,47 +152,9 @@ func (a *Type) validate(t token) (token, error) {
 		return t, nil
 	}
 	t.created = time.Now().Unix()
-	val, err := a.encrypt(t)
-	if err != nil {
-		return t, err
-	}
-	t.val = val
-	return t, nil
-}
-
-// Initializes an authentication instance by setting the key and iv for AES, and setting the token expiration
-// interval. It expects an implementation of PasswordChecker, which will be used to check user credentials when
-// AuthPwd is called. The names of files containing the AES key and iv must be set. (The token expiration's
-// default is 90 days.)
-func New(c PasswordChecker, s Settings) (*Type, error) {
-	if c == nil {
-		return nil, noPasswordChecker
-	}
-	var (
-		i             Type
-		tokenValidity int
-	)
-	i.checker = c
-	if s != nil {
-		i.key = s.AesKey()
-		i.iv = s.AesIv()
-		tokenValidity = s.TokenValidity()
-	}
-	if len(i.key) == 0 || len(i.iv) == 0 {
-		log.Println("AES has not been configured.")
-	}
-	if len(i.key) == 0 {
-		i.key = make([]byte, aes.BlockSize)
-	}
-	if len(i.iv) == 0 {
-		i.iv = make([]byte, aes.BlockSize)
-	}
-	if tokenValidity == 0 {
-		tokenValidity = defaultTokenValidity
-	}
-	i.tokenValidity = time.Duration(tokenValidity) * time.Second
-	i.renewThreshold = time.Duration(float64(i.tokenValidity) * renewThresholdRate)
-	return &i, nil
+	v, err := a.encrypt(t)
+	t.val = v
+	return t, err
 }
 
 // Checks if the provided username and password are correct. If yes, an authentication token is returned,

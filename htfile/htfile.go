@@ -242,7 +242,7 @@ func getQryExpression(qry url.Values, key string) (*regexp.Regexp, error) {
 		return nil, nil
 	}
 	expr := exprs[0]
-	if len(expr) == 0 {
+	if expr == "" {
 		return nil, nil
 	}
 	return regexp.Compile(expr)

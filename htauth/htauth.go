@@ -7,13 +7,14 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"bytes"
 )
 
 const (
 	credXHeaderUserKey    = "X-Auth-Username"
 	credXHeaderPwdKey     = "X-Auth-Password"
 	credXHeaderTokenKey   = "X-Auth-Token"
-	credHeaderUserKey         = "Authorization"
+	credHeaderUserKey     = "Authorization"
 	tokenCookieName       = "tasked-auth"
 	basicAuthType         = "Basic"
 	userKey               = "username"
@@ -43,6 +44,11 @@ type Auth interface {
 	GetUser(Token) (string, error)
 }
 
+type Settings interface {
+	AllowCookies() bool
+	CookieMaxAge() int
+}
+
 type token struct {
 	val []byte
 }
@@ -56,45 +62,19 @@ func (t *token) Value() []byte { return t.val }
 
 type filter struct {
 	auth Auth
+	allowCookies bool
+	cookieMaxAge int
 }
 
-func New(a Auth) (share.HttpFilter, error) {
+func New(a Auth, s Settings) (share.HttpFilter, error) {
 	if a == nil {
 		return nil, authNotSet
 	}
-	return &filter{auth: a}, nil
-}
-
-func (a *filter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	a.Filter(w, r, nil)
-}
-
-func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (interface{}, bool) {
-	// if method OPTIONS or HEAD, do nothing
-	// check for credentials
-	// if credentials, authenticate credentials
-	// else check for token
-	// if token authenticate
-	// if method AUTH, return handled
-	// if no credentials and no token, and method AUTH fail
-	// if is auth request and no credentials, return 401 with basic authentication request
-
-	var (
-		isAuth bool
-		err    error
-	)
-	if r.Method == "OPTIONS" || r.Method == "HEAD" {
-		return nil, false
+	ha := filter{auth: a}
+	if s != nil {
+		ha.allowCookies = s.AllowCookies()
 	}
-	isAuth, err = isAuthRequest(r)
-	if !share.CheckBadReq(w, err == nil) {
-		return nil, true
-	}
-	_, _, _, err = getCreds(r, isAuth)
-	if !share.CheckBadReq(w, err == nil) {
-		return nil, true
-	}
-	return nil, false
+	return &ha, nil
 }
 
 func isAuthRequest(r *http.Request) (bool, error) {
@@ -140,7 +120,7 @@ func getCredsXHeaderUser(r *http.Request) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if len(user) == 0 {
+	if user == "" {
 		return "", "", invalidHeader
 	}
 	pwd, err := getOneOrZero(r.Header, credXHeaderPwdKey)
@@ -170,105 +150,174 @@ func getCredsHeaderUser(r *http.Request) (string, string, error) {
 	return cs[0], cs[1], nil
 }
 
-func getCredsXHeaderToken(r *http.Request) (Token, error) {
+func getCredsXHeaderToken(r *http.Request) (string, error) {
 	if _, ok := r.Header[credXHeaderTokenKey]; !ok {
-		return nil, nil
+		return "", nil
 	}
 	ts, err := getOneOrZero(r.Header, credXHeaderTokenKey)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if len(ts) == 0 {
-		return nil, invalidHeader
+	if ts == "" {
+		err = invalidHeader
 	}
-	return newTokenString(ts)
+	return ts, err
 }
 
-func getCredsCookie(r *http.Request) (Token, error) {
+func getCredsCookie(r *http.Request) (string, error) {
 	var tc *http.Cookie
 	for _, c := range r.Cookies() {
 		if c.Name != tokenCookieName {
 			continue
 		}
 		if tc != nil {
-			return nil, invalidHeader
+			return "", invalidHeader
 		}
 		tc = c
 	}
-	if tc == nil || len(tc.Value) == 0 {
-		return nil, nil
+	var v string
+	if tc != nil {
+		v = tc.Value
 	}
-	return newTokenString(tc.Value)
+	return v, nil
 }
 
-func getCredsJson(r *http.Request) (string, string, Token, error) {
-	var (
-		user, pwd, ts string
-		t             Token
-		isDefined     bool
-		err           error
-		m             map[string]string
-	)
+func getCredsJson(r *http.Request) (user, pwd, t string, err error) {
+	var m map[string]string
 	err = share.ReadJsonRequest(r, &m, maxRequestBody)
 	if err != nil {
-		return "", "", nil, err
+		return
 	}
-	user, isDefined = m[userKey]
-	if isDefined && len(user) == 0 {
-		return "", "", nil, invalidData
+	user, isDefined := m[userKey]
+	if isDefined && user == "" {
+		err = invalidData
+		return
 	}
 	pwd = m[pwdKey]
-	ts, isDefined = m[tokenKey]
-	if isDefined {
-		if len(ts) == 0 {
-			return "", "", nil, invalidData
-		}
-		t, err = newTokenString(ts)
+	t, isDefined = m[tokenKey]
+	if isDefined && t == "" {
+		err = invalidData
 	}
 	return user, pwd, t, err
 }
 
-func getCreds(r *http.Request, isAuth bool) (string, string, Token, error) {
-	user, pwd, err := getCredsXHeaderUser(r)
-	if err != nil || len(user) > 0 {
-		return user, pwd, nil, err
+func (a *filter) getCreds(r *http.Request, isAuth bool) (user, pwd, t string, err error) {
+	user, pwd, err = getCredsXHeaderUser(r)
+	if err != nil || user != "" {
+		return
 	}
 
 	user, pwd, err = getCredsHeaderUser(r)
-	if err != nil || len(user) > 0 {
-		return user, pwd, nil, err
+	if err != nil || user != "" {
+		return
 	}
 
 	if !isAuth {
-		t, err := getCredsXHeaderToken(r)
-		if err != nil || t != nil {
-			return "", "", t, err
+		t, err = getCredsXHeaderToken(r)
+		if err != nil || t != "" {
+			return
 		}
-		t, err = getCredsCookie(r)
-		return "", "", t, err
+		if a.allowCookies {
+			t, err = getCredsCookie(r)
+		}
+		return
 	}
 
-	t, err := getCredsXHeaderToken(r)
-	if err != nil || t != nil {
-		return "", "", t, err
+	t, err = getCredsXHeaderToken(r)
+	if err != nil || t != "" {
+		return
 	}
 
 	ct, err := getOneOrZero(r.Header, share.HeaderContentType)
 	if err != nil {
-		return "", "", nil, err
+		return
 	}
-	if len(ct) > 0 {
+	if ct != "" {
 		if ct, _, err = mime.ParseMediaType(ct); err != nil {
-			return "", "", nil, err
+			return
 		}
 	}
 	if ct == mimeJson {
 		user, pwd, t, err = getCredsJson(r)
 	}
-	if err != nil || len(user) > 0 || t != nil {
-		return user, pwd, t, err
+	if err != nil || user != "" || t != "" {
+		return
 	}
 
 	t, err = getCredsCookie(r)
-	return "", "", t, err
+	return
+}
+
+func (a *filter) checkCreds(user, pwd string, t Token) (Token, error) {
+	if len(user) > 0 {
+		return a.auth.AuthPwd(user, pwd)
+	}
+	if t != nil {
+		return a.auth.AuthToken(t)
+	}
+	return nil, nil
+}
+
+func (a *filter) ServeHTTP(w http.ResponseWriter, r *http.Request) { a.Filter(w, r, nil) }
+
+func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (interface{}, bool) {
+	if r.Method == "OPTIONS" || r.Method == "HEAD" {
+		return nil, false
+	}
+
+	isAuth, err := isAuthRequest(r)
+	if !share.CheckBadReq(w, err == nil) {
+		return nil, true
+	}
+
+	user, pwd, ts, err := a.getCreds(r, isAuth)
+	if !share.CheckBadReq(w, err == nil) {
+		return nil, true
+	}
+
+	var tp Token
+	if user == "" && ts != "" {
+		tp, err = newTokenString(ts)
+		if !share.CheckBadReq(w, err == nil) {
+			return nil, true
+		}
+	}
+
+	tn, err := a.checkCreds(user, pwd, tp)
+	if err != nil || tn == nil {
+		if isAuth {
+			share.ErrorResponse(w, http.StatusNotFound)
+		}
+		return nil, isAuth
+	}
+
+	if user == "" {
+		user, err = a.auth.GetUser(tn)
+		if err != nil {
+			if isAuth {
+				share.ErrorResponse(w, http.StatusNotFound)
+			}
+			return nil, isAuth
+		}
+	}
+
+	tnv := tn.Value()
+	isNew := tp == nil || !bytes.Equal(tnv, tp.Value())
+	if isNew {
+		ts = base64.StdEncoding.EncodeToString(tnv)
+	}
+
+	h := w.Header()
+	h.Set(credXHeaderTokenKey, ts)
+	if a.allowCookies {
+		http.SetCookie(w, &http.Cookie{
+			Name: tokenCookieName,
+			Value: ts,
+			MaxAge: a.cookieMaxAge})
+	}
+	if isAuth {
+		w.Write([]byte(ts))
+	}
+
+	return user, isAuth
 }
