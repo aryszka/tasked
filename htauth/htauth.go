@@ -258,7 +258,11 @@ func (a *filter) checkCreds(user, pwd string, t Token) (Token, error) {
 	return nil, nil
 }
 
-func (a *filter) ServeHTTP(w http.ResponseWriter, r *http.Request) { a.Filter(w, r, nil) }
+func (a *filter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	u, h := a.Filter(w, r, nil)
+	us, ok := u.(string)
+	share.CheckHandle(w, h || ok && us != "", http.StatusNotFound)
+}
 
 func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (interface{}, bool) {
 	if r.Method == "OPTIONS" || r.Method == "HEAD" {

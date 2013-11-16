@@ -857,6 +857,89 @@ func TestCheckCreds(t *testing.T) {
 	}
 }
 
+func TestServeHTTP(t *testing.T) {
+	var (
+		a = &filter{auth: new(auth)}
+	)
+	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
+		a.ServeHTTP(w, r)
+	}
+
+	rq, err := http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Set(credXHeaderUserKey, "123")
+	rq.Header.Set(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Set(credXHeaderUserKey, "123")
+	rq.Header.Set(credXHeaderPwdKey, "456")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Set(credXHeaderUserKey, "123")
+	rq.Header.Set(credXHeaderPwdKey, "123")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusOK {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Set(credXHeaderUserKey, "123")
+	rq.Header.Set(credXHeaderPwdKey, "456")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusNotFound {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("GET", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Set(credXHeaderTokenKey, "not base64")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+
+	rq, err = http.NewRequest("AUTH", tst.S.URL, nil)
+	tst.ErrFatal(t, err)
+	rq.Header.Set(credXHeaderTokenKey, "not base64")
+	tst.Htreqr(t, rq, func(rsp *http.Response) {
+		if rsp.StatusCode != http.StatusBadRequest {
+			t.Fail()
+		}
+	})
+}
+
 func TestFilter(t *testing.T) {
 	var (
 		a = &filter{auth: new(auth)}
