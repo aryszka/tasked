@@ -5,11 +5,11 @@ import (
 	"code.google.com/p/tasked/share"
 	tst "code.google.com/p/tasked/testing"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"testing"
-	"errors"
-	"io/ioutil"
 )
 
 var authError = errors.New("auth error")
@@ -354,11 +354,11 @@ func TestGetCredsXHeaderToken(t *testing.T) {
 
 func TestGetCredsCookie(t *testing.T) {
 	var (
-		tk      string
-		err     error
-		r       *http.Request
-		v       = []byte("some")
-		valid   = base64.StdEncoding.EncodeToString(v)
+		tk    string
+		err   error
+		r     *http.Request
+		v     = []byte("some")
+		valid = base64.StdEncoding.EncodeToString(v)
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
 		tk, err = getCredsCookie(r)
@@ -480,7 +480,7 @@ func TestGetCredsValidation(t *testing.T) {
 		enced        = base64.StdEncoding.EncodeToString(val)
 		invalidEnced = base64.StdEncoding.EncodeToString([]byte(tuser + "-" + tpwd))
 		valid        = basicAuthType + " " + enced
-		a = &filter{allowCookies: true}
+		a            = &filter{allowCookies: true}
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
 		user, pwd, tk, err = a.getCreds(r, isAuth)
@@ -649,7 +649,7 @@ func TestGetCredsPrecedence(t *testing.T) {
 		encedj    = base64.StdEncoding.EncodeToString(tj)
 		validh    = basicAuthType + " " + encedh
 		encedc    = base64.StdEncoding.EncodeToString(tc)
-		a = &filter{allowCookies: true}
+		a         = &filter{allowCookies: true}
 	)
 	tst.Thnd.Sh = func(_ http.ResponseWriter, r *http.Request) {
 		user, pwd, tk, err = a.getCreds(r, isAuth)
@@ -942,9 +942,9 @@ func TestServeHTTP(t *testing.T) {
 
 func TestFilter(t *testing.T) {
 	var (
-		a = &filter{auth: new(auth)}
-		res interface{}
-		h bool
+		a    = &filter{auth: new(auth)}
+		res  interface{}
+		h    bool
 		t123 = base64.StdEncoding.EncodeToString([]byte("123"))
 		t456 = base64.StdEncoding.EncodeToString([]byte("456"))
 	)
@@ -964,7 +964,7 @@ func TestFilter(t *testing.T) {
 		}
 	})
 
-	tst.Htreq(t, "AUTH", tst.S.URL + "?cmd=some", nil, func(rsp *http.Response) {
+	tst.Htreq(t, "AUTH", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
 		if res != nil || !h || rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}

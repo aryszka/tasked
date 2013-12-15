@@ -1,13 +1,13 @@
 package htauth
 
 import (
+	"bytes"
 	"code.google.com/p/tasked/share"
 	"encoding/base64"
 	"errors"
 	"mime"
 	"net/http"
 	"strings"
-	"bytes"
 )
 
 const (
@@ -61,7 +61,7 @@ func newTokenString(s string) (Token, error) {
 func (t *token) Value() []byte { return t.val }
 
 type filter struct {
-	auth Auth
+	auth         Auth
 	allowCookies bool
 	cookieMaxAge int
 }
@@ -315,8 +315,8 @@ func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (
 	h.Set(credXHeaderTokenKey, ts)
 	if a.allowCookies {
 		http.SetCookie(w, &http.Cookie{
-			Name: tokenCookieName,
-			Value: ts,
+			Name:   tokenCookieName,
+			Value:  ts,
 			MaxAge: a.cookieMaxAge})
 	}
 	if isAuth {

@@ -40,9 +40,32 @@ type HttpFilter interface {
 	Filter(http.ResponseWriter, *http.Request, interface{}) (interface{}, bool)
 }
 
+type cascadeFilter struct {
+	filters []HttpFilter
+}
+
+type FilterFunc func(http.ResponseWriter, *http.Request, interface{}) (interface{}, bool)
+
 type MaxReader struct {
 	Reader io.Reader
 	Count  int64
+}
+
+func (f FilterFunc) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
+	return f(w, r, d)
+}
+
+func (c *cascadeFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) { c.Filter(w, r, nil) }
+
+func (c *cascadeFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
+	var h bool
+	for _, f := range c.filters {
+		d, h = f.Filter(w, r, d)
+		if h {
+			return d, true
+		}
+	}
+	return d, false
 }
 
 func (mr *MaxReader) Read(b []byte) (n int, err error) {
@@ -214,4 +237,8 @@ func WriteJsonResponse(w http.ResponseWriter, r *http.Request, d interface{}) (i
 		return 0, nil
 	}
 	return w.Write(js)
+}
+
+func CascadeFilters(f ...HttpFilter) HttpFilter {
+	return &cascadeFilter{filters: f}
 }

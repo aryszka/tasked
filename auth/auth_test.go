@@ -2,6 +2,7 @@ package auth
 
 import (
 	"bytes"
+	tst "code.google.com/p/tasked/testing"
 	"crypto/aes"
 	"crypto/rand"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"testing"
 	"time"
-	tst "code.google.com/p/tasked/testing"
 )
 
 var testLong = false

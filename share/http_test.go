@@ -17,6 +17,37 @@ import (
 	"testing"
 )
 
+func TestCascadeFilter(t *testing.T) {
+	f := CascadeFilters()
+	res, handled := f.Filter(nil, nil, nil)
+	if res != nil || handled {
+		t.Fail()
+	}
+
+	f = CascadeFilters(
+		FilterFunc(func(_ http.ResponseWriter, _ *http.Request, d interface{}) (interface{}, bool) {
+			di, ok := d.(int)
+			if !ok || di != 1 {
+				t.Fail()
+			}
+			return 2, false
+		}), FilterFunc(func(_ http.ResponseWriter, _ *http.Request, d interface{}) (interface{}, bool) {
+			di, ok := d.(int)
+			if !ok || di != 2 {
+				t.Fail()
+			}
+			return 3, true
+		}), FilterFunc(func(_ http.ResponseWriter, _ *http.Request, d interface{}) (interface{}, bool) {
+			t.Fail()
+			return nil, false
+		}))
+	res, handled = f.Filter(nil, nil, 1)
+	resi, ok := res.(int)
+	if !ok || resi != 3 || !handled {
+		t.Fail()
+	}
+}
+
 func TestMaxReader(t *testing.T) {
 	buf := bytes.NewBuffer([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1})
 	mr := &MaxReader{Reader: buf, Count: 0}

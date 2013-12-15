@@ -42,3 +42,4 @@ func main() {
 // todo:
 // - document that character encoding of request data is always assumed to be utf-8, explicit declarations are
 // ignored
+// - make it exit nice, trap term and int, cleanup listener, return
