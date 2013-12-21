@@ -1,7 +1,5 @@
 package htproc
 
-// todo: test different process exit scenarios
-
 import (
 	"bufio"
 	"errors"

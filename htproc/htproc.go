@@ -18,13 +18,13 @@ type ProcFilter struct {
 	portFrom int
 	portTo   int
 	maxProcs int
-	ps       *procStore
+	ProcStore       *procStore
 }
 
-func New(s Settings, r func(*ProcError)) *ProcFilter {
+func New(s Settings) *ProcFilter {
 	// validate settings
 	f := new(ProcFilter)
-	f.ps = newProcStore(s, r)
+	f.ProcStore = newProcStore(s)
 	return f
 }
 
@@ -41,7 +41,7 @@ func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{
 		return nil, false
 	}
 	for {
-		p, err := f.ps.get(u)
+		p, err := f.ProcStore.get(u)
 		if !CheckHandle(w, err != procStoreClosed, http.StatusNotFound) ||
 			!CheckServerError(w, err == nil) {
 			return nil, true
@@ -53,4 +53,4 @@ func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{
 	}
 }
 
-func (f *ProcFilter) Close() { f.ps.close() }
+func (f *ProcFilter) Close() { f.ProcStore.close() }

@@ -3,7 +3,6 @@ package htproc
 import (
 	"errors"
 	"fmt"
-	"log"
 )
 
 type ProcError struct {
@@ -19,11 +18,11 @@ type procMap map[string]*proc
 
 type procStore struct {
 	maxProcs  int
-	procError func(*ProcError)
 	m         chan procMap
 	cr        chan string
 	rm        chan *proc
 	closed    chan int
+	ProcError chan *ProcError
 }
 
 var (
@@ -31,19 +30,24 @@ var (
 	procCleanupFailed = errors.New("Proc cleanup failed.")
 )
 
-func newProcStore(s Settings, r func(*ProcError)) *procStore {
+func newProcStore(s Settings) *procStore {
 	ps := new(procStore)
 	ps.maxProcs = s.MaxProcesses()
-	ps.procError = r
-	if ps.procError == nil {
-		ps.procError = func(pe *ProcError) { log.Println(pe) }
-	}
 	ps.m = make(chan procMap)
 	ps.cr = make(chan string)
 	ps.rm = make(chan *proc)
 	ps.closed = make(chan int)
+	ps.ProcError = make(chan *ProcError)
 	go ps.mapFeed()
 	return ps
+}
+
+func (ps *procStore) sendProcError(user string, err error) {
+	select {
+	case <-ps.closed:
+	case ps.ProcError <- &ProcError{User: user, Err: err}:
+	default:
+	}
 }
 
 func (ps *procStore) remove(p *proc) {
@@ -57,14 +61,14 @@ func (ps *procStore) procExited(p *proc) {
 	err := <-p.exit
 	ps.remove(p)
 	if err != nil {
-		ps.procError(&ProcError{User: p.user, Err: err})
+		ps.sendProcError(p.user, err)
 	}
 }
 
 func (ps *procStore) procCleanup(p *proc) {
 	s := <-p.cleanup
 	for _, err := range s.errors {
-		ps.procError(&ProcError{User: p.user, Err: err})
+		ps.sendProcError(p.user, err)
 	}
 	if !s.complete {
 		panic(procCleanupFailed)
@@ -163,4 +167,5 @@ func (ps *procStore) get(user string) (*proc, error) {
 
 func (ps *procStore) close() {
 	close(ps.closed)
+	close(ps.ProcError)
 }
