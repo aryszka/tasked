@@ -14,11 +14,11 @@ type Settings interface {
 }
 
 type ProcFilter struct {
-	hostname string
-	portFrom int
-	portTo   int
-	maxProcs int
-	ProcStore       *procStore
+	hostname  string
+	portFrom  int
+	portTo    int
+	maxProcs  int
+	ProcStore *procStore
 }
 
 func New(s Settings) *ProcFilter {

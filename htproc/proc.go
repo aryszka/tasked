@@ -9,39 +9,37 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+	"bytes"
 )
 
 type lineRead struct {
-	line string
+	line []byte
 	err  error
 }
 
-type cleanupStatus struct {
-	complete bool
-	errors   []error
+type status struct {
+	errors        []error
+	cleanupFailed bool
 }
 
 type proc struct {
-	user    string
-	access  time.Time
-	cmd     *exec.Cmd
-	started bool
-	stdout  chan lineRead
-	stderr  chan lineRead
-	ready   chan int
-	closed  chan int
-	exit    chan error
-	cleanup chan cleanupStatus
+	user   string
+	access time.Time
+	cmd    *exec.Cmd
+	stdout chan lineRead
+	stderr chan lineRead
+	ready  chan int
+	exit   chan int
 }
 
 const (
 	userFlag       = "-user"
-	startupMessage = "ready"
 	startupTimeout = 3 * time.Second
 	exitTimeout    = 3 * time.Second
 )
 
 var (
+	startupMessage = []byte("ready")
 	procClosed       = errors.New("Process closed.")
 	unexpectedExit   = errors.New("Process exited unexpectedly.")
 	startupTimeouted = errors.New("Process startup timeouted.")
@@ -53,44 +51,39 @@ func newProc(user string) *proc {
 	p.user = user
 	p.access = time.Now()
 	p.ready = make(chan int)
-	p.closed = make(chan int)
-	p.exit = make(chan error)
-	p.cleanup = make(chan cleanupStatus)
-	go p.start()
+	p.exit = make(chan int)
 	return p
 }
 
-func (p *proc) exitUnstarted(err error) {
-	close(p.ready)
-	p.exit <- err
-	p.cleanup <- cleanupStatus{complete: true}
-}
-
-// sends nil, eof or other error
-func copyLines(w io.Writer, r io.Reader, l ...string) chan lineRead {
+func filterLines(w io.Writer, r io.Reader, l ...[]byte) chan lineRead {
 	c := make(chan lineRead)
 	go func() {
-		ls := make([]string, len(l))
+		ls := make([][]byte, len(l))
 		for i, li := range l {
 			if li[len(li)-1] != '\n' {
-				li = li + "\n"
+				li = append(li, '\n')
 			}
 			ls[i] = li
 		}
 		br := bufio.NewReader(r)
 		for {
-			lr, err := br.ReadString('\n')
-			if err != nil {
+			lr, err := br.ReadSlice('\n')
+			eof := err == io.EOF
+			if err != nil && !eof {
 				c <- lineRead{err: err}
 				return
 			}
 			found := false
 			for i, li := range ls {
-				if li != lr {
+				if eof {
+					li = li[0:len(li) - 1]
+				}
+				if !bytes.Equal(li, lr) {
 					continue
 				}
 				found = true
 				c <- lineRead{line: l[i]}
+				break
 			}
 			if !found {
 				_, err = w.Write([]byte(lr))
@@ -99,160 +92,131 @@ func copyLines(w io.Writer, r io.Reader, l ...string) chan lineRead {
 					return
 				}
 			}
+			if eof {
+				c <- lineRead{err: io.EOF}
+				return
+			}
 		}
 	}()
 	return c
 }
 
-func (p *proc) signalExit(kill bool) error {
-	var s syscall.Signal
-	if kill {
-		s = syscall.SIGKILL
-	} else {
-		s = syscall.SIGTERM
+func waitOutput(output chan lineRead) error {
+	for {
+		var l lineRead
+		if l = <-output; l.err == nil {
+			continue
+		}
+		if l.err == io.EOF {
+			return nil
+		}
+		return l.err
 	}
-	return p.cmd.Process.Signal(s)
 }
 
-func waitOutput(skip, lr chan lineRead) error {
-	if skip == lr {
-		return nil
+func (p *proc) waitExit() status {
+	err := p.cmd.Process.Signal(syscall.SIGTERM)
+	if err != nil {
+		return status{cleanupFailed: true, errors: []error{err}}
 	}
-	l := <-lr
-	if l.err == io.EOF {
-		return nil
-	}
-	return l.err
-}
-
-func (p *proc) cleanupSocket() error {
-	var err error
-	if os.IsNotExist(err) {
-		return nil
-	}
-	return err
-}
-
-func (p *proc) waitExit(skip chan lineRead, kill bool) {
-	w := make(chan error)
-	go func() { w <- p.cmd.Wait() }()
+	w := make(chan status)
+	go func() {
+		s := status{}
+		if err := p.cmd.Wait(); err != nil {
+			s.cleanupFailed = true
+			s.errors = append(s.errors, err)
+		}
+		if err := waitOutput(p.stdout); err != nil {
+			s.errors = append(s.errors, err)
+		}
+		if err := waitOutput(p.stderr); err != nil {
+			s.errors = append(s.errors, err)
+		}
+		w <- s
+	}()
+	var kill bool
 	for {
 		select {
-		case err := <-w:
-			cs := cleanupStatus{complete: true}
-			if err != nil {
-				cs.complete = false
-				cs.errors = append(cs.errors, err)
-			}
-			if err = waitOutput(skip, p.stdout); err != nil {
-				cs.errors = append(cs.errors, err)
-			}
-			if err = waitOutput(skip, p.stderr); err != nil {
-				cs.errors = append(cs.errors, err)
-			}
-			if err = p.cleanupSocket(); err != nil {
-				cs.errors = append(cs.errors, err)
-			}
-			p.cleanup <- cs
-			return
+		case s := <-w:
+			return s
 		case <-time.After(exitTimeout):
 			if kill {
-				p.cleanup <- cleanupStatus{errors: []error{exitTimeouted}}
-				return
+				return status{cleanupFailed: true, errors: []error{exitTimeouted}}
 			}
 			kill = true
-			if err := p.signalExit(true); err != nil {
-				p.cleanup <- cleanupStatus{errors: []error{err}}
-				return
+			if err := p.cmd.Process.Signal(syscall.SIGKILL); err != nil {
+				return status{cleanupFailed: true, errors: []error{err}}
 			}
 		}
 	}
 }
 
-func (p *proc) checkOutput(o chan lineRead, err error) bool {
-	switch err {
-	case nil:
-		return true
-	case io.EOF:
-		if !p.started {
-			close(p.ready)
-		}
-		p.exit <- nil
-		p.waitExit(o, false)
-	default:
-		if !p.started {
-			close(p.ready)
-		}
-		p.exit <- err
-		if err = p.signalExit(true); err == nil {
-			p.waitExit(o, true)
-		} else {
-			p.cleanup <- cleanupStatus{errors: []error{err}}
-		}
+func (p *proc) outputError(err error) status {
+	if err == io.EOF {
+		err = unexpectedExit
 	}
-	return false
+	s := p.waitExit()
+	s.errors = append(s.errors, err)
+	return s
 }
 
-func (p *proc) start() {
-	p.cmd = exec.Command(os.Args[0], userFlag, p.user)
+func (p *proc) run() status {
 	var (
 		err    error
 		so, se io.Reader
 	)
+	p.cmd = exec.Command(os.Args[0], userFlag, p.user)
 	if so, err = p.cmd.StdoutPipe(); err != nil {
-		p.exitUnstarted(err)
-		return
+		return status{errors: []error{err}}
 	}
 	if se, err = p.cmd.StderrPipe(); err != nil {
-		p.exitUnstarted(err)
-		return
+		return status{errors: []error{err}}
 	}
 	if err = p.cmd.Start(); err != nil {
-		p.exitUnstarted(err)
-		return
+		return status{errors: []error{err}}
 	}
-	sto := time.After(startupTimeout)
-	p.stdout = copyLines(os.Stdout, so, startupMessage)
-	p.stderr = copyLines(os.Stderr, se)
+	p.stdout = filterLines(os.Stdout, so, startupMessage)
+	p.stderr = filterLines(os.Stderr, se)
+	to := time.After(startupTimeout)
+	started := false
 	for {
 		select {
-		case <-sto:
-			if !p.started {
-				close(p.ready)
-				p.exit <- startupTimeouted
-				if err := p.signalExit(true); err != nil {
-					p.cleanup <- cleanupStatus{errors: []error{err}}
-					return
-				}
-				p.waitExit(nil, true)
-				return
-			}
+		case <-to:
+			s := p.waitExit()
+			s.errors = append(s.errors, startupTimeouted)
+			return s
 		case l := <-p.stdout:
-			if !p.checkOutput(p.stdout, l.err) {
-				return
+			if l.err != nil {
+				return p.outputError(l.err)
 			}
-			if !p.started && l.line == startupMessage {
+			if !started && bytes.Equal(l.line, startupMessage) {
+				started = true
 				close(p.ready)
-				p.started = true
 			}
 		case l := <-p.stderr:
-			if !p.checkOutput(p.stderr, l.err) {
-				return
+			if l.err != nil {
+				return p.outputError(l.err)
 			}
-		case <-p.closed:
-			if !p.started {
+		case <-p.exit:
+			if started {
 				close(p.ready)
 			}
-			p.exit <- nil
-			if err := p.signalExit(false); err != nil {
-				p.cleanup <- cleanupStatus{errors: []error{err}}
-				return
-			}
-			p.waitExit(nil, false)
-			return
+			return p.waitExit()
 		}
 	}
 }
 
-func (p *proc) serve(w http.ResponseWriter, r *http.Request) error { return nil }
-func (p *proc) close()                                             { close(p.closed) }
+func (p *proc) close() {
+	close(p.exit)
+}
+
+func (p *proc) serve(w http.ResponseWriter, r *http.Request) error {
+	<-p.ready
+	select {
+	case <-p.exit:
+		return procClosed
+	default:
+		p.access = time.Now()
+		return nil
+	}
+}

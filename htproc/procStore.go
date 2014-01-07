@@ -3,6 +3,7 @@ package htproc
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 type ProcError struct {
@@ -10,24 +11,38 @@ type ProcError struct {
 	Err  error
 }
 
+type exitStatus struct {
+	proc   *proc
+	status status
+}
+
 func (pe *ProcError) Error() string {
 	return fmt.Sprintf("[%s]: %v\n", pe.User, pe.Err)
+}
+
+func (pe *ProcError) Fatal() bool {
+	return pe.Err == procCleanupFailed
 }
 
 type procMap map[string]*proc
 
 type procStore struct {
-	maxProcs  int
-	m         chan procMap
-	cr        chan string
-	rm        chan *proc
-	closed    chan int
-	ProcError chan *ProcError
+	maxProcs int
+	m        chan procMap
+	cr       chan string
+	rm       chan *proc
+	procExit chan exitStatus
+	exit     chan int
 }
 
+const (
+	procStoreCloseTimeout = 6 * time.Second
+)
+
 var (
-	procStoreClosed   = errors.New("ProcStore closed.")
-	procCleanupFailed = errors.New("Proc cleanup failed.")
+	procStoreClosed         = errors.New("Proc store closed.")
+	procCleanupFailed       = errors.New("Proc cleanup failed.")
+	procStoreCloseTimeouted = errors.New("Proc store close timeouted.")
 )
 
 func newProcStore(s Settings) *procStore {
@@ -36,43 +51,14 @@ func newProcStore(s Settings) *procStore {
 	ps.m = make(chan procMap)
 	ps.cr = make(chan string)
 	ps.rm = make(chan *proc)
-	ps.closed = make(chan int)
-	ps.ProcError = make(chan *ProcError)
-	go ps.mapFeed()
+	ps.procExit = make(chan exitStatus)
+	ps.exit = make(chan int)
 	return ps
 }
 
-func (ps *procStore) sendProcError(user string, err error) {
-	select {
-	case <-ps.closed:
-	case ps.ProcError <- &ProcError{User: user, Err: err}:
-	default:
-	}
-}
-
-func (ps *procStore) remove(p *proc) {
-	select {
-	case <-ps.closed:
-	case ps.rm <- p:
-	}
-}
-
-func (ps *procStore) procExited(p *proc) {
-	err := <-p.exit
-	ps.remove(p)
-	if err != nil {
-		ps.sendProcError(p.user, err)
-	}
-}
-
-func (ps *procStore) procCleanup(p *proc) {
-	s := <-p.cleanup
-	for _, err := range s.errors {
-		ps.sendProcError(p.user, err)
-	}
-	if !s.complete {
-		panic(procCleanupFailed)
-	}
+func (ps *procStore) runProc(p *proc) {
+	s := p.run()
+	ps.procExit <- exitStatus{proc: p, status: s}
 }
 
 func (ps *procStore) addProc(m procMap, user string) procMap {
@@ -92,39 +78,74 @@ func (ps *procStore) addProc(m procMap, user string) procMap {
 		delete(nm, oldest.user)
 	}
 	p := newProc(user)
-	go ps.procExited(p)
-	go ps.procCleanup(p)
+	go ps.runProc(p)
 	nm[user] = p
 	return nm
 }
 
-func (ps *procStore) removeProc(m procMap, remove *proc) procMap {
-	if p, ok := m[remove.user]; !ok || p != remove {
+func removeProc(m procMap, p *proc) procMap {
+	if pu, ok := m[p.user]; !ok || pu != p {
 		return m
 	}
-	remove.close()
+	p.close()
 	nm := make(procMap)
-	for u, p := range m {
-		if p != remove {
-			nm[u] = p
+	for u, pu := range m {
+		if pu != p {
+			nm[u] = pu
 		}
 	}
 	return nm
 }
 
-func (ps *procStore) mapFeed() {
+func (ps *procStore) closeAll(m procMap, procErrors chan error) error {
+	for _, p := range m {
+		p.close()
+	}
+	waitAll := make(chan error)
+	go func() {
+		for len(m) > 0 {
+			s := <-ps.procExit
+			delete(m, s.proc.user)
+			if procErrors != nil {
+				for _, err := range s.status.errors {
+					procErrors <- &ProcError{User: s.proc.user, Err: err}
+				}
+			}
+			if s.status.cleanupFailed {
+				waitAll <- procCleanupFailed
+				return
+			}
+		}
+		waitAll <- nil
+	}()
+	select {
+	case err := <-waitAll:
+		return err
+	case <-time.After(procStoreCloseTimeout):
+		return procStoreCloseTimeouted
+	}
+}
+
+func (ps *procStore) run(procErrors chan error) error {
 	m := make(procMap)
 	for {
 		select {
 		case user := <-ps.cr:
 			m = ps.addProc(m, user)
 		case p := <-ps.rm:
-			m = ps.removeProc(m, p)
-		case <-ps.closed:
-			for _, p := range m {
-				p.close()
+			m = removeProc(m, p)
+		case s := <-ps.procExit:
+			m = removeProc(m, s.proc)
+			if procErrors != nil {
+				for _, err := range s.status.errors {
+					procErrors <- &ProcError{User: s.proc.user, Err: err}
+				}
 			}
-			return
+			if s.status.cleanupFailed {
+				return &ProcError{User: s.proc.user, Err: procCleanupFailed}
+			}
+		case <-ps.exit:
+			return ps.closeAll(m, procErrors)
 		default:
 			ps.m <- m
 		}
@@ -133,7 +154,7 @@ func (ps *procStore) mapFeed() {
 
 func (ps *procStore) getMap() (procMap, error) {
 	select {
-	case <-ps.closed:
+	case <-ps.exit:
 		return nil, procStoreClosed
 	case m := <-ps.m:
 		return m, nil
@@ -142,7 +163,7 @@ func (ps *procStore) getMap() (procMap, error) {
 
 func (ps *procStore) create(user string) error {
 	select {
-	case <-ps.closed:
+	case <-ps.exit:
 		return procStoreClosed
 	case ps.cr <- user:
 		return nil
@@ -166,6 +187,5 @@ func (ps *procStore) get(user string) (*proc, error) {
 }
 
 func (ps *procStore) close() {
-	close(ps.closed)
-	close(ps.ProcError)
+	close(ps.exit)
 }
