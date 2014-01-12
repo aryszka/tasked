@@ -6,7 +6,16 @@ import (
 	"net/http"
 	"testing"
 	"time"
+	"flag"
 )
+
+var testLong = false
+
+func init() {
+	tl := flag.Bool("test.long", false, "")
+	flag.Parse()
+	testLong = *tl
+}
 
 type testSettings struct {
 	hostname      string

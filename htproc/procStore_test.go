@@ -133,6 +133,9 @@ func TestRemoveProc(t *testing.T) {
 }
 
 func TestCloseAll(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
 	// nothing to close
 	ps := new(procStore)
 	m := make(procMap)
@@ -268,6 +271,10 @@ func TestFindUser(t *testing.T) {
 }
 
 func TestProcStoreRun(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	// run, exit
 	ps := new(procStore)
 	ps.exit = make(chan int)

@@ -410,6 +410,10 @@ func TestWaitOutput(t *testing.T) {
 }
 
 func TestWaitExit(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	var (
 		p     *proc
 		err   error
@@ -603,6 +607,10 @@ func TestOutputError(t *testing.T) {
 }
 
 func TestProcRun(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	// start fail
 	p := new(proc)
 	p.ready = make(chan int)
@@ -734,6 +742,10 @@ func TestProcRun(t *testing.T) {
 }
 
 func TestServe(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	// access
 	p := new(proc)
 	p.ready = make(chan int)
