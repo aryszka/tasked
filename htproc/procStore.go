@@ -69,7 +69,7 @@ func (ps *procStore) addProc(m procMap, user string) procMap {
 	nm := make(procMap)
 	for u, p := range m {
 		nm[u] = p
-		if oldest == nil || p.access.Before(oldest.access) {
+		if oldest == nil || p.accessed.Before(oldest.accessed) {
 			oldest = p
 		}
 	}
