@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"syscall"
 	"testing"
@@ -99,9 +98,10 @@ func lineFeed(l []byte) []byte {
 
 func TestNewProc(t *testing.T) {
 	t0 := time.Now()
-	p := newProc(testuser)
+	cmd := exec.Command("")
+	p := newProc(cmd)
 	t1 := time.Now()
-	if p.user != testuser {
+	if p.cmd != cmd {
 		t.Fail()
 	}
 	if p.accessed.Before(t0) || p.accessed.After(t1) {
@@ -140,93 +140,97 @@ func TestFilterLines(t *testing.T) {
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, two)
 	found := false
-loop0:
-	for {
-		select {
-		case li := <-lr:
-			if found {
-				if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				if found {
+					if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
+						t.Fail()
+					}
+					return
+				} else {
+					if !bytes.Equal(li.line, two) {
+						t.Fail()
+					}
+					found = true
 				}
-				break loop0
-			} else {
-				if !bytes.Equal(li.line, two) {
-					t.Fail()
-				}
-				found = true
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// find last line
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, three)
 	found = false
-loop00:
-	for {
-		select {
-		case li := <-lr:
-			if found {
-				if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, two}) {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				if found {
+					if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, two}) {
+						t.Fail()
+					}
+					return
+				} else {
+					if !bytes.Equal(li.line, three) {
+						t.Fail()
+					}
+					found = true
 				}
-				break loop00
-			} else {
-				if !bytes.Equal(li.line, three) {
-					t.Fail()
-				}
-				found = true
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// find a line, with line-break
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, lineFeed(two))
 	found = false
-loop1:
-	for {
-		select {
-		case li := <-lr:
-			if found {
-				if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				if found {
+					if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
+						t.Fail()
+					}
+					return
+				} else {
+					if !bytes.Equal(li.line, lineFeed(two)) {
+						t.Fail()
+					}
+					found = true
 				}
-				break loop1
-			} else {
-				if !bytes.Equal(li.line, lineFeed(two)) {
-					t.Fail()
-				}
-				found = true
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// find multiple lines
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, lineFeed(two), three)
 	var rl [][]byte
-loop2:
-	for {
-		select {
-		case li := <-lr:
-			rl = append(rl, li.line)
-			if li.err != nil {
-				if li.err != io.EOF {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				rl = append(rl, li.line)
+				if li.err != nil {
+					if li.err != io.EOF {
+						t.Fail()
+					}
+					return
 				}
-				break loop2
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 	if !linesEqual(w.lines, [][]byte{one}) || !linesEqual(rl, [][]byte{lineFeed(two), three}) {
 		t.Fail()
 	}
@@ -234,100 +238,105 @@ loop2:
 	// detect non-eof read error, immediately
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError})
-loop3:
-	for {
-		select {
-		case li := <-lr:
-			if li.err != testError ||
-				!linesEqual(w.lines, nil) {
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				if li.err != testError ||
+					!linesEqual(w.lines, nil) {
+					t.Fail()
+				}
+				return
+			case <-time.After(eto):
 				t.Fail()
 			}
-			break loop3
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// detect non-eof read error
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 4})
-loop4:
-	for {
-		select {
-		case li := <-lr:
-			if li.err != testError ||
-				!linesEqual(w.lines, [][]byte{one}) {
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				if li.err != testError ||
+					!linesEqual(w.lines, [][]byte{one}) {
+					t.Fail()
+				}
+				return
+			case <-time.After(eto):
 				t.Fail()
 			}
-			break loop4
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// detect non-eof read error, last
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 7})
-loop5:
-	for {
-		select {
-		case li := <-lr:
-			if li.err != testError ||
-				!linesEqual(w.lines, [][]byte{one}) && !linesEqual(w.lines, [][]byte{one, two}) {
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				if li.err != testError ||
+					!linesEqual(w.lines, [][]byte{one}) && !linesEqual(w.lines, [][]byte{one, two}) {
+					t.Fail()
+				}
+				return
+			case <-time.After(eto):
 				t.Fail()
 			}
-			break loop5
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// detect non-eof read error, before found
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 1}, two)
 	rl = nil
-loop6:
-	for {
-		select {
-		case li := <-lr:
-			rl = append(rl, li.line)
-			if li.err != nil {
-				if li.err != testError {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				rl = append(rl, li.line)
+				if li.err != nil {
+					if li.err != testError {
+						t.Fail()
+					}
+					if !linesEqual(rl, nil) {
+						t.Fail()
+					}
+					return
 				}
-				if !linesEqual(rl, nil) {
-					t.Fail()
-				}
-				break loop6
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// detect non-eof read error, after found
 	w = new(testWriter)
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 6}, two)
 	rl = nil
-loop7:
-	for {
-		select {
-		case li := <-lr:
-			rl = append(rl, li.line)
-			if li.err != nil {
-				if li.err != testError {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				rl = append(rl, li.line)
+				if li.err != nil {
+					if li.err != testError {
+						t.Fail()
+					}
+					if !linesEqual(w.lines, [][]byte{one}) ||
+						!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
+						t.Fail()
+					}
+					return
 				}
-				if !linesEqual(w.lines, [][]byte{one}) ||
-					!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
-					t.Fail()
-				}
-				break loop7
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 
 	// detect write error
 	w = new(testWriter)
@@ -335,25 +344,26 @@ loop7:
 	w.errIndex = 4
 	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, two)
 	rl = nil
-loop8:
-	for {
-		select {
-		case li := <-lr:
-			rl = append(rl, li.line)
-			if li.err != nil {
-				if li.err != testError {
-					t.Fail()
+	func() {
+		for {
+			select {
+			case li := <-lr:
+				rl = append(rl, li.line)
+				if li.err != nil {
+					if li.err != testError {
+						t.Fail()
+					}
+					if len(w.lines) == 0 || !bytes.Equal(w.lines[0], one) ||
+						!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
+						t.Fail()
+					}
+					return
 				}
-				if len(w.lines) == 0 || !bytes.Equal(w.lines[0], one) ||
-					!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
-					t.Fail()
-				}
-				break loop8
+			case <-time.After(eto):
+				t.Fail()
 			}
-		case <-time.After(eto):
-			t.Fail()
 		}
-	}
+	}()
 }
 
 func TestWaitOutput(t *testing.T) {
@@ -592,17 +602,20 @@ func TestOutputError(t *testing.T) {
 	}
 }
 
-func TestRun(t *testing.T) {
+func TestProcRun(t *testing.T) {
 	// start fail
 	p := new(proc)
-	s := p.run("")
+	p.ready = make(chan int)
+	p.cmd = exec.Command("")
+	s := p.run()
 	if len(s.errors) == 0 {
 		t.Fail()
 	}
 
 	// start timeout running
 	p = new(proc)
-	s = p.run("testproc", "wait", fmt.Sprint(startupTimeoutMs*2))
+	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs*2))
+	s = p.run()
 	found := false
 	for _, e := range s.errors {
 		if e != startupTimeouted {
@@ -617,7 +630,8 @@ func TestRun(t *testing.T) {
 
 	// exit before timeout
 	p = new(proc)
-	s = p.run("testproc", "wait", fmt.Sprint(startupTimeoutMs/2))
+	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs/2))
+	s = p.run()
 	found = false
 	for _, e := range s.errors {
 		if e != unexpectedExit {
@@ -627,65 +641,59 @@ func TestRun(t *testing.T) {
 		break
 	}
 	if !found {
-		t.Log("here")
 		t.Fail()
 	}
 
 	// run, exit
 	p = new(proc)
+	p.cmd = exec.Command("testproc", "printwait", "4500", "some message", string(startupMessage), "")
 	p.ready = make(chan int)
 	p.exit = make(chan int)
 	to := make(chan int)
 	go func() {
-		s = p.run("testproc", "printwait", "4500", "some message", string(startupMessage), "")
-		log.Println("exited")
+		s = p.run()
 		if s.cleanupFailed {
-			log.Println("cleanup failed")
 			t.Fail()
 		}
 		close(to)
 	}()
 	select {
 	case <-p.ready:
-		log.Println("even if")
 		p.close()
 		<-to
 	case <-to:
-		log.Println("closing")
 		t.Fail()
 	}
 
 	// start message twice
 	p = new(proc)
+	p.cmd = exec.Command("testproc", "printwait", "4500", string(startupMessage), string(startupMessage))
 	p.ready = make(chan int)
 	p.exit = make(chan int)
 	to = make(chan int)
 	go func() {
-		s = p.run("testproc", "printwait", "4500", string(startupMessage), string(startupMessage))
-		log.Println("exited")
+		s = p.run()
 		if s.cleanupFailed {
-			log.Println("cleanup failed")
 			t.Fail()
 		}
 		close(to)
 	}()
 	select {
 	case <-p.ready:
-		log.Println("even if")
 		p.close()
 		<-to
 	case <-to:
-		log.Println("closing")
 		t.Fail()
 	}
 
 	// close before started
 	p = new(proc)
+	p.cmd = exec.Command("testproc", "wait", "4500")
 	p.ready = make(chan int)
 	p.exit = make(chan int)
 	to = make(chan int)
 	go func() {
-		s = p.run("testproc", "wait", "4500")
+		s = p.run()
 		if s.cleanupFailed {
 			t.Fail()
 		}
@@ -702,24 +710,22 @@ func TestRun(t *testing.T) {
 
 	// update access time
 	p = new(proc)
+	p.cmd = exec.Command("testproc", "printwait", "4500", string(startupMessage))
 	p.ready = make(chan int)
-	p.access = make(chan int)
+	p.access = make(chan time.Time)
 	p.exit = make(chan int)
 	now := time.Now()
 	p.accessed = now
 	to = make(chan int)
 	go func() {
-		log.Println("started")
-		s = p.run("testproc", "printwait", "4500", string(startupMessage))
+		s = p.run()
 		if s.cleanupFailed {
-			t.Log("really, here")
-			t.Log(s.errors)
 			t.Fail()
 		}
 		close(to)
 	}()
 	time.Sleep(120)
-	p.access <- 0
+	p.access <- time.Now()
 	p.close()
 	<-to
 	if !p.accessed.After(now) {
@@ -731,7 +737,7 @@ func TestServe(t *testing.T) {
 	// access
 	p := new(proc)
 	p.ready = make(chan int)
-	p.access = make(chan int)
+	p.access = make(chan time.Time)
 	to := make(chan int)
 	go func() {
 		err := p.serve(nil, nil)

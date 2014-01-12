@@ -3,6 +3,7 @@ package htproc
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"time"
 )
 
@@ -14,14 +15,6 @@ type ProcError struct {
 type exitStatus struct {
 	proc   *proc
 	status status
-}
-
-func (pe *ProcError) Error() string {
-	return fmt.Sprintf("[%s]: %v\n", pe.User, pe.Err)
-}
-
-func (pe *ProcError) Fatal() bool {
-	return pe.Err == procCleanupFailed
 }
 
 type procMap map[string]*proc
@@ -45,6 +38,14 @@ var (
 	procStoreCloseTimeouted = errors.New("Proc store close timeouted.")
 )
 
+func (pe *ProcError) Error() string {
+	return fmt.Sprintf("[%s]: %v\n", pe.User, pe.Err)
+}
+
+func (pe *ProcError) Fatal() bool {
+	return pe.Err == procCleanupFailed
+}
+
 func newProcStore(s Settings) *procStore {
 	ps := new(procStore)
 	ps.maxProcs = s.MaxProcesses()
@@ -65,50 +66,55 @@ func (ps *procStore) addProc(m procMap, user string) procMap {
 	if _, ok := m[user]; ok {
 		return m
 	}
-	var oldest *proc
+	var (
+		oldestUser string
+		oldestProc *proc
+	)
 	nm := make(procMap)
 	for u, p := range m {
 		nm[u] = p
-		if oldest == nil || p.accessed.Before(oldest.accessed) {
-			oldest = p
+		if oldestProc == nil || p.accessed.Before(oldestProc.accessed) {
+			oldestProc = p
+			oldestUser = u
 		}
 	}
 	if ps.maxProcs > 0 && len(nm) >= ps.maxProcs {
-		oldest.close()
-		delete(nm, oldest.user)
+		oldestProc.close()
+		delete(nm, oldestUser)
 	}
-	p := newProc(user)
+	p := newProc(exec.Command(""))
 	go ps.runProc(p)
 	nm[user] = p
 	return nm
 }
 
 func removeProc(m procMap, p *proc) procMap {
-	if pu, ok := m[p.user]; !ok || pu != p {
-		return m
-	}
-	p.close()
 	nm := make(procMap)
-	for u, pu := range m {
-		if pu != p {
-			nm[u] = pu
+	for u, pi := range m {
+		if pi == p {
+			continue
 		}
+		nm[u] = pi
 	}
 	return nm
 }
 
 func (ps *procStore) closeAll(m procMap, procErrors chan error) error {
-	for _, p := range m {
+	pu := make(map[*proc]string)
+	for u, p := range m {
+		pu[p] = u
 		p.close()
 	}
+	c := len(m)
 	waitAll := make(chan error)
 	go func() {
-		for len(m) > 0 {
+		for c > 0 {
 			s := <-ps.procExit
-			delete(m, s.proc.user)
+			c--
 			if procErrors != nil {
+				user, _ := pu[s.proc]
 				for _, err := range s.status.errors {
-					procErrors <- &ProcError{User: s.proc.user, Err: err}
+					procErrors <- &ProcError{User: user, Err: err}
 				}
 			}
 			if s.status.cleanupFailed {
@@ -126,6 +132,16 @@ func (ps *procStore) closeAll(m procMap, procErrors chan error) error {
 	}
 }
 
+func findUser(m procMap, p *proc) string {
+	for u, pi := range m {
+		if pi != p {
+			continue
+		}
+		return u
+	}
+	return ""
+}
+
 func (ps *procStore) run(procErrors chan error) error {
 	m := make(procMap)
 	for {
@@ -133,21 +149,26 @@ func (ps *procStore) run(procErrors chan error) error {
 		case user := <-ps.cr:
 			m = ps.addProc(m, user)
 		case p := <-ps.rm:
+			p.close()
 			m = removeProc(m, p)
 		case s := <-ps.procExit:
 			m = removeProc(m, s.proc)
+			var user string
 			if procErrors != nil {
+				user = findUser(m, s.proc)
 				for _, err := range s.status.errors {
-					procErrors <- &ProcError{User: s.proc.user, Err: err}
+					procErrors <- &ProcError{User: user, Err: err}
 				}
 			}
 			if s.status.cleanupFailed {
-				return &ProcError{User: s.proc.user, Err: procCleanupFailed}
+				if procErrors == nil {
+					user = findUser(m, s.proc)
+				}
+				return &ProcError{User: user, Err: procCleanupFailed}
 			}
 		case <-ps.exit:
 			return ps.closeAll(m, procErrors)
-		default:
-			ps.m <- m
+		case ps.m <- m:
 		}
 	}
 }
