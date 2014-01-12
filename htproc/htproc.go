@@ -2,6 +2,7 @@ package htproc
 
 import (
 	. "code.google.com/p/tasked/share"
+	"log"
 	"net/http"
 	"time"
 )
@@ -18,30 +19,29 @@ type ProcFilter struct {
 	portFrom  int
 	portTo    int
 	maxProcs  int
-	ProcStore *procStore
+	procStore *procStore
 }
 
 func New(s Settings) *ProcFilter {
 	// validate settings
 	f := new(ProcFilter)
-	f.ProcStore = newProcStore(s)
+	f.procStore = newProcStore(s)
 	return f
 }
 
-func (f *ProcFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	_, h := f.Filter(w, r, nil)
-	if !h {
-		ErrorResponse(w, http.StatusNotFound)
-	}
+func (f *ProcFilter) Run(procErrors chan error) error {
+	return f.procStore.run(procErrors)
 }
 
 func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
 	u, _ := d.(string)
 	if u == "" {
+		log.Println("no user")
 		return nil, false
 	}
+	log.Println("got user")
 	for {
-		p, err := f.ProcStore.get(u)
+		p, err := f.procStore.get(u)
 		if !CheckHandle(w, err != procStoreClosed, http.StatusNotFound) ||
 			!CheckServerError(w, err == nil) {
 			return nil, true
@@ -53,4 +53,8 @@ func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{
 	}
 }
 
-func (f *ProcFilter) Close() { f.ProcStore.close() }
+func (f *ProcFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ErrorResponse(w, http.StatusNotFound)
+}
+
+func (f *ProcFilter) Close() { f.procStore.close() }

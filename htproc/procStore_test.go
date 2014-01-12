@@ -8,14 +8,6 @@ import (
 	"time"
 )
 
-type testSettings struct {
-	hostname      string
-	portRangeFrom int
-	portRangeTo   int
-	maxProcesses  int
-	idleTimeout   time.Duration
-}
-
 func (s *testSettings) Hostname() string           { return s.hostname }
 func (s *testSettings) PortRange() (int, int)      { return s.portRangeFrom, s.portRangeTo }
 func (s *testSettings) MaxProcesses() int          { return s.maxProcesses }
