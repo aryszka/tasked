@@ -40,7 +40,7 @@ func authPam(user, pwd string) error {
 	return nil
 }
 
-func newAuth(s *settings) (*auth.Type, error) {
+func newAuth(s *settings) (*auth.It, error) {
 	if s == nil {
 		s = &settings{}
 	}

@@ -27,3 +27,15 @@ func Doretlog(do func() error, delay time.Duration) {
 func Doretlog42(do func() error) {
 	Doretlog(do, 42*time.Millisecond)
 }
+
+func Dorep(do func() error, report func(...interface{})) {
+	err := do()
+	if err == nil {
+		return
+	}
+	report(err)
+}
+
+func Dolog(do func() error) {
+	Dorep(do, log.Println)
+}

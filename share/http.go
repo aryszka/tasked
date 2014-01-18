@@ -25,7 +25,15 @@ const (
 )
 
 var (
-	allCmds                   = []string{CmdProps, CmdSearch, CmdModprops, CmdDelete, CmdMkdir, CmdCopy, CmdRename, CmdAuth}
+	allCmds                   = []string{
+		CmdProps,
+		CmdSearch,
+		CmdModprops,
+		CmdDelete,
+		CmdMkdir,
+		CmdCopy,
+		CmdRename,
+		CmdAuth}
 	HeaderContentType         = http.CanonicalHeaderKey("content-type")
 	HeaderContentLength       = http.CanonicalHeaderKey("content-length")
 	JsonContentType           = "application/json; charset=utf-8"
@@ -37,14 +45,21 @@ var (
 )
 
 type HttpFilter interface {
+	http.Handler
 	Filter(http.ResponseWriter, *http.Request, interface{}) (interface{}, bool)
 }
+
+type FilterFunc func(http.ResponseWriter, *http.Request, interface{}) (interface{}, bool)
+
+type SelectFilter func(d interface{}) HttpFilter
 
 type cascadeFilter struct {
 	filters []HttpFilter
 }
 
-type FilterFunc func(http.ResponseWriter, *http.Request, interface{}) (interface{}, bool)
+type endFilter struct {
+	hnd http.Handler
+}
 
 type MaxReader struct {
 	Reader io.Reader
@@ -55,7 +70,9 @@ func (f FilterFunc) Filter(w http.ResponseWriter, r *http.Request, d interface{}
 	return f(w, r, d)
 }
 
-func (c *cascadeFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) { c.Filter(w, r, nil) }
+func (f FilterFunc) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f(w, r, nil)
+}
 
 func (c *cascadeFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
 	var h bool
@@ -66,6 +83,25 @@ func (c *cascadeFilter) Filter(w http.ResponseWriter, r *http.Request, d interfa
 		}
 	}
 	return d, false
+}
+
+func (c *cascadeFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) { c.Filter(w, r, nil) }
+
+func (e *endFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
+	e.hnd.ServeHTTP(w, r)
+	return nil, true
+}
+
+func (e *endFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	e.hnd.ServeHTTP(w, r)
+}
+
+func (sf SelectFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
+	return sf(d).Filter(w, r, d)
+}
+
+func (sf SelectFilter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	sf(nil).ServeHTTP(w, r)
 }
 
 func (mr *MaxReader) Read(b []byte) (n int, err error) {
@@ -241,4 +277,8 @@ func WriteJsonResponse(w http.ResponseWriter, r *http.Request, d interface{}) (i
 
 func CascadeFilters(f ...HttpFilter) HttpFilter {
 	return &cascadeFilter{filters: f}
+}
+
+func EndFilter(hnd http.Handler) HttpFilter {
+	return &endFilter{hnd}
 }

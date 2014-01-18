@@ -7,51 +7,43 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"testing"
+	"io/ioutil"
 )
+
+const autoUser = "auto user"
 
 var authError = errors.New("auth error")
 
 type auth int
 
-func (a *auth) AuthPwd(user, pwd string) (Token, error) {
-	if user == pwd {
-		return &token{val: []byte("123")}, nil
-	}
+func (a *auth) AuthPwd(user, pwd string) ([]byte, error) {
 	if user == "" {
-		return nil, nil
+		return nil, authError
+	}
+	if user == pwd {
+		return []byte("123"), nil
 	}
 	return nil, authError
 }
 
-func (a *auth) AuthToken(t Token) (Token, error) {
+func (a *auth) AuthToken(t []byte) ([]byte, string, error) {
 	if t == nil {
-		return nil, nil
+		return nil, "", authError
 	}
-	if bytes.Equal(t.Value(), []byte("123")) {
-		return t, nil
+	if bytes.Equal(t, []byte("123")) {
+		return t, autoUser, nil
 	}
-	if bytes.Equal(t.Value(), []byte("456")) {
-		return &token{val: []byte("123")}, nil
+	if bytes.Equal(t, []byte("456")) {
+		return []byte("123"), autoUser, nil
 	}
-	return nil, authError
-}
-
-func (a *auth) GetUser(t Token) (string, error) {
-	if t == nil {
-		return "", nil
-	}
-	if bytes.Equal(t.Value(), []byte("123")) || bytes.Equal(t.Value(), []byte("456")) {
-		return "123", nil
-	}
-	return "", authError
+	return nil, "", authError
 }
 
 func TestNewTokenString(t *testing.T) {
 	tk, err := newTokenString("")
-	if err != nil || t == nil || len(tk.Value()) != 0 {
+	if err != nil || t == nil || len(tk) != 0 {
 		t.Fail()
 	}
 	tk, err = newTokenString("not base64")
@@ -60,7 +52,7 @@ func TestNewTokenString(t *testing.T) {
 	}
 	b := []byte("some")
 	tk, err = newTokenString(base64.StdEncoding.EncodeToString(b))
-	if err != nil || !bytes.Equal(tk.Value(), b) {
+	if err != nil || !bytes.Equal(tk, b) {
 		t.Fail()
 	}
 }
@@ -534,7 +526,6 @@ func TestGetCredsValidation(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
 		if err == nil {
-			t.Log("here")
 			t.Fail()
 		}
 	})
@@ -543,7 +534,6 @@ func TestGetCredsValidation(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
 		if err != nil || tk != enced {
-			t.Log("here")
 			t.Fail()
 		}
 	})
@@ -613,7 +603,6 @@ func TestGetCredsValidation(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
 		if err == nil {
-			t.Log("here")
 			t.Fail()
 		}
 	})
@@ -622,7 +611,6 @@ func TestGetCredsValidation(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: enced})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
 		if err != nil || tk != enced {
-			t.Log("here")
 			t.Fail()
 		}
 	})
@@ -785,7 +773,6 @@ func TestGetCredsPrecedence(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: tokenCookieName, Value: encedc})
 	tst.Htreqr(t, r, func(rsp *http.Response) {
 		if err != nil || user != userj || pwd != pwdj {
-			t.Log("here")
 			t.Fail()
 		}
 	})
@@ -826,32 +813,32 @@ func TestGetCredsPrecedence(t *testing.T) {
 func TestCheckCreds(t *testing.T) {
 	a := &filter{auth: new(auth)}
 
-	tk, err := a.checkCreds("123", "123", nil)
-	if err != nil || tk == nil {
+	tk, u, err := a.checkCreds("123", "123", nil)
+	if err != nil || tk == nil || u != "123" {
 		t.Fail()
 	}
 
-	tk, err = a.checkCreds("123", "456", nil)
+	tk, u, err = a.checkCreds("123", "456", nil)
 	if err == nil {
 		t.Fail()
 	}
 
-	tk, err = a.checkCreds("", "", &token{val: []byte("123")})
-	if err != nil || tk == nil || !bytes.Equal(tk.Value(), []byte("123")) {
+	tk, _, err = a.checkCreds("", "", []byte("123"))
+	if err != nil || tk == nil || !bytes.Equal(tk, []byte("123")) {
 		t.Fail()
 	}
 
-	tk, err = a.checkCreds("", "", &token{val: []byte("456")})
-	if err != nil || tk == nil || !bytes.Equal(tk.Value(), []byte("123")) {
+	tk, _, err = a.checkCreds("", "", []byte("456"))
+	if err != nil || tk == nil || !bytes.Equal(tk, []byte("123")) {
 		t.Fail()
 	}
 
-	tk, err = a.checkCreds("", "", &token{val: []byte("789")})
+	tk, _, err = a.checkCreds("", "", []byte("789"))
 	if err == nil {
 		t.Fail()
 	}
 
-	tk, err = a.checkCreds("", "", nil)
+	tk, _, err = a.checkCreds("", "", nil)
 	if err != nil || tk != nil {
 		t.Fail()
 	}
@@ -1033,6 +1020,7 @@ func TestFilter(t *testing.T) {
 	tst.Htreqr(t, rq, func(rsp *http.Response) {
 		tks := rsp.Header[credXHeaderTokenKey]
 		if len(tks) != 1 || tks[0] != t123 {
+			t.Log("so here", len(tks))
 			t.Fail()
 		}
 	})

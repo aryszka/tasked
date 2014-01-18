@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"log"
 )
 
 const (
@@ -34,14 +35,9 @@ var (
 	maxRequestBody          = defaultMaxRequestBody
 )
 
-type Token interface {
-	Value() []byte
-}
-
 type Auth interface {
-	AuthPwd(string, string) (Token, error)
-	AuthToken(Token) (Token, error)
-	GetUser(Token) (string, error)
+	AuthPwd(string, string) ([]byte, error)
+	AuthToken([]byte) ([]byte, string, error)
 }
 
 type Settings interface {
@@ -49,16 +45,9 @@ type Settings interface {
 	CookieMaxAge() int
 }
 
-type token struct {
-	val []byte
+func newTokenString(s string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(s)
 }
-
-func newTokenString(s string) (Token, error) {
-	b, err := base64.StdEncoding.DecodeString(s)
-	return &token{b}, err
-}
-
-func (t *token) Value() []byte { return t.val }
 
 type filter struct {
 	auth         Auth
@@ -248,14 +237,15 @@ func (a *filter) getCreds(r *http.Request, isAuth bool) (user, pwd, t string, er
 	return
 }
 
-func (a *filter) checkCreds(user, pwd string, t Token) (Token, error) {
+func (a *filter) checkCreds(user, pwd string, t []byte) ([]byte, string, error) {
 	if len(user) > 0 {
-		return a.auth.AuthPwd(user, pwd)
+		t, err := a.auth.AuthPwd(user, pwd)
+		return t, user, err
 	}
 	if t != nil {
 		return a.auth.AuthToken(t)
 	}
-	return nil, nil
+	return nil, "", nil
 }
 
 func (a *filter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +269,7 @@ func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (
 		return nil, true
 	}
 
-	var tp Token
+	var tp []byte
 	if user == "" && ts != "" {
 		tp, err = newTokenString(ts)
 		if !share.CheckBadReq(w, err == nil) {
@@ -287,28 +277,18 @@ func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (
 		}
 	}
 
-	tn, err := a.checkCreds(user, pwd, tp)
-	if err != nil || tn == nil {
+	tn, user, err := a.checkCreds(user, pwd, tp)
+	if err != nil || len(tn) == 0 || user == "" {
 		if isAuth {
 			share.ErrorResponse(w, http.StatusNotFound)
 		}
+		log.Println("here", len(tn), len(user), err)
 		return nil, isAuth
 	}
 
-	if user == "" {
-		user, err = a.auth.GetUser(tn)
-		if err != nil {
-			if isAuth {
-				share.ErrorResponse(w, http.StatusNotFound)
-			}
-			return nil, isAuth
-		}
-	}
-
-	tnv := tn.Value()
-	isNew := tp == nil || !bytes.Equal(tnv, tp.Value())
+	isNew := len(tp) == 0 || !bytes.Equal(tn, tp)
 	if isNew {
-		ts = base64.StdEncoding.EncodeToString(tnv)
+		ts = base64.StdEncoding.EncodeToString(tn)
 	}
 
 	h := w.Header()
