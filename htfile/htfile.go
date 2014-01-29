@@ -484,8 +484,7 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi
 	if r.Method == "HEAD" {
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	io.Copy(w, f)
+	io.Copy(w, f) // todo: diag log
 }
 
 func (h *handler) putf(w http.ResponseWriter, r *http.Request) {

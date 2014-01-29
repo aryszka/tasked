@@ -20,7 +20,7 @@ type ProcFilter struct {
 }
 
 func New(s Settings) *ProcFilter {
-	// validate settings, apply defaults if not set
+	// todo: validate settings, apply defaults if not set
 	f := new(ProcFilter)
 	f.procStore = newProcStore(s)
 	return f
@@ -33,17 +33,26 @@ func (f *ProcFilter) Run(procErrors chan error) error {
 func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{}) (interface{}, bool) {
 	u, _ := d.(string)
 	if u == "" {
-		return nil, false
+		return d, false
 	}
 	for {
 		p, err := f.procStore.get(u)
-		if !CheckHandle(w, err != procStoreClosed, http.StatusNotFound) ||
+		if !CheckHandle(w, err != procStoreClosed && err != temporarilyBanned, http.StatusNotFound) ||
 			!CheckServerError(w, err == nil) {
-			return nil, true
+			return d, true
 		}
 		err = p.serve(w, r)
-		if err == nil || !CheckServerError(w, err == procClosed) {
-			return nil, true
+		if err == nil {
+			return d, true
+		}
+		if serr, ok := err.(*socketError); ok {
+			if !serr.handled {
+				ErrorResponse(w, http.StatusNotFound)
+			}
+			return d, true
+		}
+		if !CheckServerError(w, err == procClosed) {
+			return d, true
 		}
 	}
 }

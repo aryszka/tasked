@@ -8,8 +8,13 @@ import (
 	"net/http"
 	"sync"
 	"crypto/tls"
+	"net"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"io"
+	"bytes"
+	"time"
 )
 
 const (
@@ -57,7 +62,15 @@ const (
 	defaultTestdir = "test"
 )
 
+type Htclient interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
 type TestHandler struct {
+	Sh func(w http.ResponseWriter, r *http.Request)
+}
+
+type TestHandlerX struct {
 	Sh func(w http.ResponseWriter, r *http.Request)
 }
 
@@ -72,12 +85,25 @@ func (th *TestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	th.Sh(w, r)
 }
 
+func (thx *TestHandlerX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h := thx.Sh
+	if h == nil {
+		h = Thnd.Sh
+	}
+	if h == nil {
+		panic("Test handler x not initialized.")
+	}
+	h(w, r)
+}
+
 var (
 	Testdir  = defaultTestdir
 	Testuser string
 	Testpwd  string
 	Thnd         = new(TestHandler)
+	Thndx         = new(TestHandlerX)
 	S            *httptest.Server
+	Sx           *httptest.Server
 	Mx           = new(sync.Mutex)
 )
 
@@ -118,6 +144,10 @@ func init() {
 	S = httptest.NewUnstartedServer(Thnd)
 	S.TLS = &tls.Config{Certificates: []tls.Certificate{c}}
 	S.StartTLS()
+	Sx, err = StartSocketServer(path.Join(Testdir, "sockets/default"))
+	if err != nil {
+		panic(err)
+	}
 }
 
 func envdef(key, dflt string) string {
@@ -220,16 +250,83 @@ func Mkclient() *http.Client {
 				InsecureSkipVerify: true}}}
 }
 
-func Htreqr(t Fataler, r *http.Request, clb func(rsp *http.Response)) {
-	client := Mkclient()
-	rsp, err := client.Do(r)
+func Htrek(t Fataler, c Htclient, r *http.Request, clb func(rsp *http.Response)) {
+	rsp, err := c.Do(r)
 	ErrFatal(t, err)
-	defer rsp.Body.Close()
+	defer func() {
+		ErrFatal(t, rsp.Body.Close())
+	}()
 	clb(rsp)
+}
+
+func Htreqr(t Fataler, r *http.Request, clb func(rsp *http.Response)) {
+	Htrek(t, Mkclient(), r, clb)
 }
 
 func Htreq(t Fataler, method, url string, body io.Reader, clb func(rsp *http.Response)) {
 	r, err := http.NewRequest(method, url, body)
 	ErrFatal(t, err)
 	Htreqr(t, r, clb)
+}
+
+func Mkhtrex(socket string) func(Fataler, string, string, io.Reader, func(rsp *http.Response)) {
+	return func(t Fataler, method, rawurl string, body io.Reader, clb func(rsp *http.Response)) {
+		u, err := url.Parse(rawurl)
+		ErrFatal(t, err)
+		r, err := http.NewRequest(method, u.Path+"?"+u.RawQuery, body)
+		ErrFatal(t, err)
+		nc, err := net.Dial("unixpacket", socket)
+		ErrFatal(t, err)
+		Htrek(t, httputil.NewClientConn(nc, nil), r, clb)
+	}
+}
+
+func Htrex(t Fataler, method, url string, body io.Reader, clb func(rsp *http.Response)) {
+	Mkhtrex(path.Join(Testdir, "sockets/default"))(t, method, url, body, clb)
+}
+
+func Htreqx(t Fataler, method, path string, body io.ReadSeeker, clb func(rsp *http.Response)) {
+	Htreq(t, method, path, body, clb)
+	if body != nil {
+		body.Seek(0, 0)
+	}
+	Htrex(t, method, path, body, clb)
+}
+
+func StartSocketServer(addr string) (*httptest.Server, error) {
+	err := os.Remove(addr)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	err = EnsureDir(path.Dir(addr))
+	if err != nil {
+		return nil, err
+	}
+	sl, err := net.Listen("unixpacket", addr)
+	if err != nil {
+		return nil, err
+	}
+	s := httptest.NewUnstartedServer(Thndx)
+	s.Listener = sl
+	s.Start()
+	return s, nil
+}
+
+func NewByteReaderString(s string) *bytes.Reader {
+	return bytes.NewReader([]byte(s))
+}
+
+func WithTimeout(t Fataler, to time.Duration, f func()) {
+	select {
+	case <-func() chan int {
+		c := make(chan int)
+		go func() {
+			f()
+			c <- 0
+		}()
+		return c
+	}():
+	case <-time.After(to):
+		t.Fatal("test timeouted")
+	}
 }

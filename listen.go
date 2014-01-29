@@ -53,7 +53,7 @@ func getTcpSettings(s *settings) ([]byte, []byte, string, error) {
 	return tlsKey, tlsCert, address, nil
 }
 
-func listen(s *settings) (net.Listener, error) {
+func listenTcp(s *settings) (net.Listener, error) {
 	tlsKey, tlsCert, address, err := getTcpSettings(s)
 	if err != nil {
 		return nil, err
@@ -70,4 +70,8 @@ func listen(s *settings) (net.Listener, error) {
 		NextProtos:   []string{"http/1.1"},
 		Certificates: []tls.Certificate{cert}})
 	return l, nil
+}
+
+func listenUnix(s *settings) (net.Listener, error) {
+	return nil, nil
 }

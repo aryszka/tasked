@@ -910,7 +910,7 @@ func TestSearchf(t *testing.T) {
 	tst.EnsureDirF(t, p)
 
 	checkError := func(err int) {
-		tst.Htreq(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
+		tst.Htreqx(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
 			if rsp.StatusCode != err {
 				t.Fail()
 			}
@@ -918,7 +918,7 @@ func TestSearchf(t *testing.T) {
 	}
 	checkBadReq := func() { checkError(http.StatusBadRequest) }
 	checkLen := func(l int) {
-		tst.Htreq(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
+		tst.Htreqx(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
 			}
@@ -1013,7 +1013,7 @@ func TestSearchf(t *testing.T) {
 	mts["dirA"] = fid.ModTime().Unix()
 	sizeOfADir := fid.Size()
 	queryString = make(url.Values)
-	tst.Htreq(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1066,7 +1066,7 @@ func TestSearchNotRoot(t *testing.T) {
 	tst.EnsureDirF(t, p)
 
 	checkLen := func(l int) {
-		tst.Htreq(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
+		tst.Htreqx(t, "SEARCH", tst.S.URL+"/search", nil, func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
 			}
@@ -1120,13 +1120,13 @@ func TestPropsf(t *testing.T) {
 	url := tst.S.URL + "/" + fn
 
 	tst.RemoveIfExistsF(t, p)
-	tst.Htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
 	})
 
-	tst.Htreq(t, "PROPS", tst.S.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PROPS", tst.S.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -1139,7 +1139,7 @@ func TestPropsf(t *testing.T) {
 	jsVerify, err := json.Marshal(prVerify)
 	tst.ErrFatal(t, err)
 
-	tst.Htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
 			rsp.Header.Get(share.HeaderContentType) != share.JsonContentType {
 			t.Fail()
@@ -1168,7 +1168,7 @@ func TestPropsf(t *testing.T) {
 	})
 
 	tst.WithNewFileF(t, p, nil)
-	tst.Htreq(t, "HEAD", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "HEAD", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
 			rsp.Header.Get(share.HeaderContentType) != share.JsonContentType {
 			t.Fail()
@@ -1228,7 +1228,7 @@ func TestPropsfRoot(t *testing.T) {
 	prVerify := toPropertyMap(fiVerify, false)
 	jsVerify, err := json.Marshal(prVerify)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "PROPS", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PROPS", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1279,7 +1279,7 @@ func TestModpropsf(t *testing.T) {
 	// max req length
 	st.maxRequestBody = 8
 	ht = newHandler(t, st).(*handler)
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"something\": \"long enough\"}"),
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"something\": \"long enough\"}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusRequestEntityTooLarge {
 				t.Fail()
@@ -1289,26 +1289,24 @@ func TestModpropsf(t *testing.T) {
 	ht = newHandler(t, st).(*handler)
 
 	// json number
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"mode\":  \"not a number\"}"),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusBadRequest {
-				t.Log("here")
-				t.Log(rsp.StatusCode)
-				t.Fail()
-			}
-		})
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"mode\": 0.1}"),
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"mode\":  \"not a number\"}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusBadRequest {
 				t.Fail()
 			}
 		})
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"mode\": -2}"), func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"mode\": 0.1}"),
+		func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusBadRequest {
+				t.Fail()
+			}
+		})
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"mode\": -2}"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0600)),
+	tst.Htreqx(t, "MODPROPS", tst.S.URL+"/"+fn, tst.NewByteReaderString(fmt.Sprintf("{\"mode\": %d}", 0600)),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusOK {
 				t.Fail()
@@ -1318,53 +1316,57 @@ func TestModpropsf(t *testing.T) {
 	tst.ErrFatal(t, err)
 
 	// valid json
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("not json"), func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("not json"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// map only or nil
-	tst.Htreq(t, "MODPROP", tst.S.URL, bytes.NewBufferString("[]"), func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROP", tst.S.URL, tst.NewByteReaderString("[]"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("null"), func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("null"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "MODPROPS", tst.S.URL, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
 
 	// one map only
-	tst.Htreq(t, "MODPROP", tst.S.URL, bytes.NewBufferString("{\"mode\": 0}{\"mode\": 0}"), func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"mode\": 0}{\"mode\": 0}"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// valid fields only
-	tst.Htreq(t, "MODPROPS", tst.S.URL, bytes.NewBufferString("{\"some\": \"value\"}"), func(rsp *http.Response) {
+	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"some\": \"value\"}"), func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// not found
-	tst.RemoveIfExistsF(t, p)
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+fn, bytes.NewBufferString("{\"mode\":0}"), func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusNotFound {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		tst.RemoveIfExistsF(t, p)
+		htr(t, "MODPROPS", tst.S.URL+"/"+fn, tst.NewByteReaderString("{\"mode\":0}"), func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusNotFound {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// bad req, path
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+string([]byte{0}), bytes.NewBufferString("{\"t\":0}"),
+	tst.Htreqx(t, "MODPROPS", tst.S.URL+"/"+string([]byte{0}), tst.NewByteReaderString("{\"t\":0}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusBadRequest {
 				t.Fail()
@@ -1372,35 +1374,43 @@ func TestModpropsf(t *testing.T) {
 		})
 
 	// mod, success
-	tst.WithNewFileF(t, p, nil)
-	err = os.Chmod(p, os.ModePerm)
-	tst.ErrFatal(t, err)
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusOK {
-				t.Fail()
-			}
-			fi, err := os.Stat(p)
-			tst.ErrFatal(t, err)
-			if fi.Mode() != os.FileMode(0744) {
-				t.Fail()
-			}
-		})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		tst.WithNewFileF(t, p, nil)
+		err = os.Chmod(p, os.ModePerm)
+		tst.ErrFatal(t, err)
+		htr(t, "MODPROPS", tst.S.URL+"/"+fn, tst.NewByteReaderString(fmt.Sprintf("{\"mode\": %d}", 0744)),
+			func(rsp *http.Response) {
+				if rsp.StatusCode != http.StatusOK {
+					t.Fail()
+				}
+				fi, err := os.Stat(p)
+				tst.ErrFatal(t, err)
+				if fi.Mode() != os.FileMode(0744) {
+					t.Fail()
+				}
+			})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// mod, success, masked
-	err = os.Chmod(p, os.ModePerm)
-	tst.ErrFatal(t, err)
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 01744)),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusOK {
-				t.Fail()
-			}
-			fi, err := os.Stat(p)
-			tst.ErrFatal(t, err)
-			if fi.Mode() != os.FileMode(0744) {
-				t.Fail()
-			}
-		})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		err = os.Chmod(p, os.ModePerm)
+		tst.ErrFatal(t, err)
+		htr(t, "MODPROPS", tst.S.URL+"/"+fn, tst.NewByteReaderString(fmt.Sprintf("{\"mode\": %d}", 01744)),
+			func(rsp *http.Response) {
+				if rsp.StatusCode != http.StatusOK {
+					t.Fail()
+				}
+				fi, err := os.Stat(p)
+				tst.ErrFatal(t, err)
+				if fi.Mode() != os.FileMode(0744) {
+					t.Fail()
+				}
+			})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestModpropsRoot(t *testing.T) {
@@ -1430,44 +1440,52 @@ func TestModpropsRoot(t *testing.T) {
 	}
 
 	// chown
-	tst.WithNewFileF(t, p, nil)
-	tst.Htreq(t, "MODPROPS", url, bytes.NewBufferString(fmt.Sprintf("{\"owner\": \"%s\"}", tst.Testuser)),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusOK {
-				t.Fail()
-			}
-			fi, err := os.Lstat(p)
-			tst.ErrFatal(t, err)
-			sstat, ok := fi.Sys().(*syscall.Stat_t)
-			if !ok {
-				t.Fatal()
-			}
-			if strconv.Itoa(int(sstat.Uid)) != usr.Uid {
-				t.Fail()
-			}
-		})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		tst.WithNewFileF(t, p, nil)
+		htr(t, "MODPROPS", url, bytes.NewBufferString(fmt.Sprintf("{\"owner\": \"%s\"}", tst.Testuser)),
+			func(rsp *http.Response) {
+				if rsp.StatusCode != http.StatusOK {
+					t.Fail()
+				}
+				fi, err := os.Lstat(p)
+				tst.ErrFatal(t, err)
+				sstat, ok := fi.Sys().(*syscall.Stat_t)
+				if !ok {
+					t.Fatal()
+				}
+				if strconv.Itoa(int(sstat.Uid)) != usr.Uid {
+					t.Fail()
+				}
+			})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// uid := syscall.Getuid()
-	tst.WithNewFileF(t, p, nil)
-	err = os.Chmod(p, os.ModePerm)
-	tst.ErrFatal(t, err)
-	tuid, err := strconv.Atoi(usr.Uid)
-	tst.ErrFatal(t, err)
-	err = syscall.Setuid(tuid)
-	tst.ErrFatal(t, err)
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		tst.WithNewFileF(t, p, nil)
+		err = os.Chmod(p, os.ModePerm)
+		tst.ErrFatal(t, err)
+		tuid, err := strconv.Atoi(usr.Uid)
+		tst.ErrFatal(t, err)
+		err = syscall.Setuid(tuid)
+		tst.ErrFatal(t, err)
 
-	tst.Htreq(t, "MODPROPS", url,
-		bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusNotFound {
-				t.Fail()
-			}
-			fi, err := os.Lstat(p)
-			tst.ErrFatal(t, err)
-			if fi.Mode() != os.ModePerm {
-				t.Fail()
-			}
-		})
+		htr(t, "MODPROPS", url,
+			bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
+			func(rsp *http.Response) {
+				if rsp.StatusCode != http.StatusNotFound {
+					t.Fail()
+				}
+				fi, err := os.Lstat(p)
+				tst.ErrFatal(t, err)
+				if fi.Mode() != os.ModePerm {
+					t.Fail()
+				}
+			})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestGetDir(t *testing.T) {
@@ -1496,7 +1514,7 @@ func TestGetDir(t *testing.T) {
 	d, err = os.Open(p)
 	tst.ErrFatal(t, err)
 	tst.RemoveIfExistsF(t, p)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -1512,7 +1530,7 @@ func TestGetDir(t *testing.T) {
 	tst.EnsureDirF(t, p)
 	d, err = os.Open(p)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1533,7 +1551,7 @@ func TestGetDir(t *testing.T) {
 	mkfile("some2", []byte{0, 0})
 	d, err = os.Open(p)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1575,7 +1593,7 @@ func TestGetDir(t *testing.T) {
 	mkfile("some2", []byte{0, 0})
 	d, err = os.Open(p)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "HEAD", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "HEAD", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1647,7 +1665,7 @@ func TestGetDirRoot(t *testing.T) {
 
 	d, err = os.Open(p)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -1688,6 +1706,8 @@ func TestGetFile(t *testing.T) {
 	var (
 		f  *os.File
 		fi os.FileInfo
+		err error
+		html = []byte("<html></html>")
 	)
 	ht := newHandler(t, &testSettings{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
@@ -1699,11 +1719,11 @@ func TestGetFile(t *testing.T) {
 	p := path.Join(dn, fn)
 	url := tst.S.URL + "/" + fn
 	tst.WithNewFileF(t, p, nil)
-	f, err := os.Open(p)
+	f, err = os.Open(p)
 	tst.ErrFatal(t, err)
 	fi, err = f.Stat()
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
 			t.Fail()
 		}
@@ -1712,88 +1732,99 @@ func TestGetFile(t *testing.T) {
 	tst.ErrFatal(t, err)
 
 	// content tested, length set, content sent
-	fn = "some-file"
-	p = path.Join(dn, fn)
-	url = tst.S.URL + "/" + fn
-	html := []byte("<html></html>")
-	tst.WithNewFileF(t, p, func(f *os.File) error {
-		_, err = f.Write(html)
-		return err
-	})
-	f, err = os.Open(p)
-	tst.ErrFatal(t, err)
-	fi, err = f.Stat()
-	tst.ErrFatal(t, err)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
-			t.Fail()
-		}
-		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
+	ff := func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		fn = "some-file"
+		p = path.Join(dn, fn)
+		url = tst.S.URL + "/" + fn
+		tst.WithNewFileF(t, p, func(f *os.File) error {
+			_, err = f.Write(html)
+			return err
+		})
+		f, err = os.Open(p)
 		tst.ErrFatal(t, err)
-		if clen != len(html) {
-			t.Fail()
-		}
-		b, err := ioutil.ReadAll(rsp.Body)
+		fi, err = f.Stat()
 		tst.ErrFatal(t, err)
-		if !bytes.Equal(b, html) {
-			t.Fail()
-		}
-	})
-	err = f.Close()
-	tst.ErrFatal(t, err)
+		htr(t, "GET", url, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
+				t.Fail()
+			}
+			clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
+			tst.ErrFatal(t, err)
+			if clen != len(html) {
+				t.Fail()
+			}
+			b, err := ioutil.ReadAll(rsp.Body)
+			tst.ErrFatal(t, err)
+			if !bytes.Equal(b, html) {
+				t.Fail()
+			}
+		})
+		err = f.Close()
+		tst.ErrFatal(t, err)
+	}
+	ff(tst.Htreq)
+	ff(tst.Htrex)
 
 	// HEAD handled
-	f, err = os.Open(p)
-	tst.ErrFatal(t, err)
-	fi, err = f.Stat()
-	tst.ErrFatal(t, err)
-	tst.Htreq(t, "HEAD", url, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
-			t.Fail()
-		}
-		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
+	ff = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		f, err = os.Open(p)
 		tst.ErrFatal(t, err)
-		if clen != len(html) {
-			t.Fail()
-		}
-		b, err := ioutil.ReadAll(rsp.Body)
+		fi, err = f.Stat()
 		tst.ErrFatal(t, err)
-		if len(b) != 0 {
-			t.Fail()
-		}
-	})
-	err = f.Close()
-	tst.ErrFatal(t, err)
+		htr(t, "HEAD", url, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
+				t.Fail()
+			}
+			clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
+			tst.ErrFatal(t, err)
+			if clen != len(html) {
+				t.Fail()
+			}
+			b, err := ioutil.ReadAll(rsp.Body)
+			tst.ErrFatal(t, err)
+			if len(b) != 0 {
+				t.Fail()
+			}
+		})
+		err = f.Close()
+		tst.ErrFatal(t, err)
+	}
+	ff(tst.Htreq)
+	ff(tst.Htrex)
 
 	// emulate copy failure
 	// file handler still open, but file deleted, can't help this without performance penalty
-	f, err = os.Open(p)
-	tst.ErrFatal(t, err)
-	fi, err = f.Stat()
-	tst.ErrFatal(t, err)
-	err = os.Remove(p)
-	tst.ErrFatal(t, err)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
-			t.Fail()
-		}
-		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
+	ff = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		f, err = os.Open(p)
 		tst.ErrFatal(t, err)
-		if clen != len(html) {
-			t.Fail()
-		}
-	})
-	err = f.Close()
-	tst.ErrFatal(t, err)
+		fi, err = f.Stat()
+		tst.ErrFatal(t, err)
+		err = os.Remove(p)
+		tst.ErrFatal(t, err)
+		htr(t, "GET", url, nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if rsp.Header.Get(share.HeaderContentType) != "text/html; charset=utf-8" {
+				t.Fail()
+			}
+			clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
+			tst.ErrFatal(t, err)
+			if clen != len(html) {
+				t.Fail()
+			}
+		})
+		err = f.Close()
+		tst.ErrFatal(t, err)
+	}
+	ff(tst.Htreq)
+	// ff(tst.Htrex)
 }
 
 func TestPutf(t *testing.T) {
@@ -1803,7 +1834,7 @@ func TestPutf(t *testing.T) {
 	}
 
 	// invalid path
-	tst.Htreq(t, "PUT", tst.S.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PUT", tst.S.URL+"/"+string([]byte{0}), nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -1812,96 +1843,116 @@ func TestPutf(t *testing.T) {
 	// existing dir
 	err := os.MkdirAll(path.Join(dn, "dir"), os.ModePerm)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "PUT", tst.S.URL+"/dir", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PUT", tst.S.URL+"/dir", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
 	})
 
 	// existing file
-	p := path.Join(dn, "file")
-	tst.RemoveIfExistsF(t, p)
-	tst.WithNewFileF(t, p, func(f *os.File) error {
-		_, err := f.Write([]byte("old content"))
-		return err
-	})
-	tst.Htreq(t, "PUT", tst.S.URL+"/file", bytes.NewBufferString("new content"), func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		f, err := os.Open(p)
-		tst.ErrFatal(t, err)
-		defer f.Close()
-		content, err := ioutil.ReadAll(f)
-		tst.ErrFatal(t, err)
-		if !bytes.Equal(content, []byte("new content")) {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		p := path.Join(dn, "file")
+		tst.RemoveIfExistsF(t, p)
+		tst.WithNewFileF(t, p, func(f *os.File) error {
+			_, err := f.Write([]byte("old content"))
+			return err
+		})
+		htr(t, "PUT", tst.S.URL+"/file", bytes.NewBufferString("new content"), func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			f, err := os.Open(p)
+			tst.ErrFatal(t, err)
+			defer f.Close()
+			content, err := ioutil.ReadAll(f)
+			tst.ErrFatal(t, err)
+			if !bytes.Equal(content, []byte("new content")) {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// new file
-	p = path.Join(dn, "file")
-	tst.RemoveIfExistsF(t, p)
-	tst.Htreq(t, "PUT", tst.S.URL+"/file", bytes.NewBufferString("some content"), func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		f, err := os.Open(p)
-		tst.ErrFatal(t, err)
-		defer f.Close()
-		content, err := ioutil.ReadAll(f)
-		tst.ErrFatal(t, err)
-		if !bytes.Equal(content, []byte("some content")) {
-			t.Fail()
-		}
-		fi, err := os.Lstat(p)
-		tst.ErrFatal(t, err)
-		if fi.Mode() != os.FileMode(0600) {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		p := path.Join(dn, "file")
+		tst.RemoveIfExistsF(t, p)
+		htr(t, "PUT", tst.S.URL+"/file", bytes.NewBufferString("some content"), func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			f, err := os.Open(p)
+			tst.ErrFatal(t, err)
+			defer f.Close()
+			content, err := ioutil.ReadAll(f)
+			tst.ErrFatal(t, err)
+			if !bytes.Equal(content, []byte("some content")) {
+				t.Fail()
+			}
+			fi, err := os.Lstat(p)
+			tst.ErrFatal(t, err)
+			if fi.Mode() != os.FileMode(0600) {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// clear file
-	p = path.Join(dn, "file")
-	tst.RemoveIfExistsF(t, p)
-	tst.WithNewFileF(t, p, func(f *os.File) error {
-		_, err := f.Write([]byte("old content"))
-		return err
-	})
-	tst.Htreq(t, "PUT", tst.S.URL+"/file", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		f, err := os.Open(p)
-		tst.ErrFatal(t, err)
-		defer f.Close()
-		content, err := ioutil.ReadAll(f)
-		tst.ErrFatal(t, err)
-		if len(content) != 0 {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		p := path.Join(dn, "file")
+		tst.RemoveIfExistsF(t, p)
+		tst.WithNewFileF(t, p, func(f *os.File) error {
+			_, err := f.Write([]byte("old content"))
+			return err
+		})
+		htr(t, "PUT", tst.S.URL+"/file", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			f, err := os.Open(p)
+			tst.ErrFatal(t, err)
+			defer f.Close()
+			content, err := ioutil.ReadAll(f)
+			tst.ErrFatal(t, err)
+			if len(content) != 0 {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// create full path
-	d0 := path.Join(dn, "dir0")
-	tst.RemoveIfExistsF(t, d0)
-	tst.Htreq(t, "PUT", tst.S.URL+"/dir0/dir1/file", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		_, err := os.Lstat(path.Join(dn, "dir0/dir1/file"))
-		if err != nil {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		d0 := path.Join(dn, "dir0")
+		tst.RemoveIfExistsF(t, d0)
+		htr(t, "PUT", tst.S.URL+"/dir0/dir1/file", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			_, err := os.Lstat(path.Join(dn, "dir0/dir1/file"))
+			if err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// max the body
-	ht = newHandler(t, &testSettings{root: dn, maxRequestBody: 8}).(*handler)
-	tst.Htreq(t, "PUT", tst.S.URL+"/file", io.LimitReader(rand.Reader, 16), func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusRequestEntityTooLarge {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
+		ht = newHandler(t, &testSettings{root: dn, maxRequestBody: 8}).(*handler)
+		htr(t, "PUT", tst.S.URL+"/file", io.LimitReader(rand.Reader, 16), func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusRequestEntityTooLarge {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestPutfNotRoot(t *testing.T) {
@@ -1921,7 +1972,7 @@ func TestPutfNotRoot(t *testing.T) {
 	tst.RemoveIfExistsF(t, p)
 	err := os.Chmod(dp, 0555)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "PUT", tst.S.URL+"/dir/file", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PUT", tst.S.URL+"/dir/file", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -1935,7 +1986,7 @@ func TestPutfNotRoot(t *testing.T) {
 	tst.RemoveIfExistsF(t, p)
 	err = os.Chmod(dp, 0666)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "PUT", tst.S.URL+"/dir/file", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PUT", tst.S.URL+"/dir/file", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -1947,7 +1998,7 @@ func TestPutfNotRoot(t *testing.T) {
 	tst.WithNewFileF(t, p, nil)
 	err = os.Chmod(p, 0444)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "PUT", tst.S.URL+"/file", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PUT", tst.S.URL+"/file", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -1967,7 +2018,7 @@ func TestCopyRename(t *testing.T) {
 
 	// no to
 	qry = make(url.Values)
-	tst.Htreq(t, "COPY", tst.S.URL, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -1978,27 +2029,31 @@ func TestCopyRename(t *testing.T) {
 	qry = make(url.Values)
 	qry.Add("to", "path0")
 	qry.Add("to", "path1")
-	tst.Htreq(t, "COPY", tst.S.URL, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// multiple to allowed
-	multiple = true
-	qry = make(url.Values)
-	qry.Add("to", "path0")
-	qry.Add("to", "path1")
-	tst.Htreq(t, "COPY", tst.S.URL+"/from", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-	})
+	ff := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		multiple = true
+		qry = make(url.Values)
+		qry.Add("to", "path0")
+		qry.Add("to", "path1")
+		htr(t, "COPY", tst.S.URL+"/from", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+		})
+	}
+	ff(tst.Htreq)
+	ff(tst.Htrex)
 
 	// copy tree above self
 	qry = make(url.Values)
 	qry.Add("to", "/path/path0")
-	tst.Htreq(t, "COPY", tst.S.URL+"/path/path0/path1", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"/path/path0/path1", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2007,7 +2062,7 @@ func TestCopyRename(t *testing.T) {
 	// copy tree below self
 	qry = make(url.Values)
 	qry.Add("to", "/path/path0/path1")
-	tst.Htreq(t, "COPY", tst.S.URL+"/path/path0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"/path/path0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2023,7 +2078,7 @@ func TestCopyRename(t *testing.T) {
 	}
 	qry = make(url.Values)
 	qry.Set("to", pto)
-	tst.Htreq(t, "COPY", tst.S.URL+"/"+pfrom, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"/"+pfrom, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2031,7 +2086,11 @@ func TestCopyRename(t *testing.T) {
 }
 
 func TestCopyf(t *testing.T) {
-	var qry url.Values
+	var (
+		qry url.Values
+		fn0 string
+		fn1 string
+	)
 	ht := newHandler(t, &testSettings{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.copyf(w, r, qry)
@@ -2039,29 +2098,37 @@ func TestCopyf(t *testing.T) {
 
 	dir := path.Join(dn, "copy")
 	tst.EnsureDirF(t, dir)
-	fn0 := path.Join(dir, "file0")
-	tst.WithNewFileF(t, fn0, nil)
-	fn1 := path.Join(dir, "file1")
-	tst.RemoveIfExistsF(t, fn1)
 
 	// copy over not existing file
-	qry = make(url.Values)
-	qry.Set("to", "/copy/file1")
-	tst.Htreq(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		fn0 = path.Join(dir, "file0")
+		tst.WithNewFileF(t, fn0, nil)
+		fn1 = path.Join(dir, "file1")
+		tst.RemoveIfExistsF(t, fn1)
+		qry = make(url.Values)
+		qry.Set("to", "/copy/file1")
+		htr(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// copy over existing file
-	tst.WithNewFileF(t, fn1, nil)
-	qry = make(url.Values)
-	qry.Set("to", "/copy/file1")
-	tst.Htreq(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		tst.WithNewFileF(t, fn1, nil)
+		qry = make(url.Values)
+		qry.Set("to", "/copy/file1")
+		htr(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// copy under not existing dir
 	dir0 := path.Join(dir, "dir0")
@@ -2069,7 +2136,7 @@ func TestCopyf(t *testing.T) {
 	fn1 = path.Join(dir0, "file1")
 	qry = make(url.Values)
 	qry.Set("to", "/copy/dir0/file1")
-	tst.Htreq(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2079,7 +2146,7 @@ func TestCopyf(t *testing.T) {
 	tst.WithNewDirF(t, dir0)
 	qry = make(url.Values)
 	qry.Set("to", "/copy/dir0")
-	tst.Htreq(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2091,7 +2158,7 @@ func TestCopyf(t *testing.T) {
 	tst.WithNewFileF(t, fn1, nil)
 	qry = make(url.Values)
 	qry.Set("to", "/copy/dir0")
-	tst.Htreq(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"/copy/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2099,42 +2166,51 @@ func TestCopyf(t *testing.T) {
 }
 
 func TestRenamef(t *testing.T) {
-	var qry url.Values
+	var (
+		qry url.Values
+		dir0 string
+		dir1 string
+		fn0 string
+		fn1 string
+	)
+	dir := path.Join(dn, "rename")
+	tst.EnsureDirF(t, dir)
 	ht := newHandler(t, &testSettings{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.renamef(w, r, qry)
 	}
 
-	dir := path.Join(dn, "rename")
-	tst.EnsureDirF(t, dir)
-	dir0 := path.Join(dir, "dir0")
-	tst.EnsureDirF(t, dir0)
-	dir1 := path.Join(dir, "dir1")
-	tst.EnsureDirF(t, dir1)
-	fn0 := path.Join(dir0, "file0")
-	tst.WithNewFileF(t, fn0, func(f *os.File) error {
-		_, err := f.Write([]byte("some content"))
-		return err
-	})
-	fn1 := path.Join(dir1, "file1")
-	tst.WithNewFileF(t, fn1, nil)
-
 	// rename file
-	qry = make(url.Values)
-	qry.Set("to", "rename/dir1/file1")
-	tst.Htreq(t, "RENAME", tst.S.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		_, err := os.Lstat(fn0)
-		if !os.IsNotExist(err) {
-			t.Fail()
-		}
-		fi1, err := os.Lstat(fn1)
-		if err != nil || fi1.Size() != int64(len("some content")) {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		dir0 = path.Join(dir, "dir0")
+		tst.EnsureDirF(t, dir0)
+		dir1 = path.Join(dir, "dir1")
+		tst.EnsureDirF(t, dir1)
+		fn0 = path.Join(dir0, "file0")
+		tst.WithNewFileF(t, fn0, func(f *os.File) error {
+			_, err := f.Write([]byte("some content"))
+			return err
+		})
+		fn1 = path.Join(dir1, "file1")
+		tst.WithNewFileF(t, fn1, nil)
+		qry = make(url.Values)
+		qry.Set("to", "rename/dir1/file1")
+		htr(t, "RENAME", tst.S.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			_, err := os.Lstat(fn0)
+			if !os.IsNotExist(err) {
+				t.Fail()
+			}
+			fi1, err := os.Lstat(fn1)
+			if err != nil || fi1.Size() != int64(len("some content")) {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// to not existing dir
 	dir0 = path.Join(dir, "dir0")
@@ -2191,7 +2267,7 @@ func TestRenamefNotRoot(t *testing.T) {
 	tst.ErrFatal(t, err)
 	qry = make(url.Values)
 	qry.Set("to", "rename/dir1/file1")
-	tst.Htreq(t, "RENAME", tst.S.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "RENAME", tst.S.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2210,7 +2286,7 @@ func TestRenamefNotRoot(t *testing.T) {
 	// no write to target
 	err = os.Chmod(dir1, 0500)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "RENAME", tst.S.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "RENAME", tst.S.URL+"/rename/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2242,22 +2318,26 @@ func TestDeletef(t *testing.T) {
 
 	// doesn't exist
 	tst.RemoveIfExistsF(t, file0)
-	tst.Htreq(t, "DELETE", tst.S.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "DELETE", tst.S.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
 
 	// exists, deleted
-	tst.WithNewFileF(t, file0, nil)
-	tst.Htreq(t, "DELETE", tst.S.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(file0); !os.IsNotExist(err) {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		tst.WithNewFileF(t, file0, nil)
+		htr(t, "DELETE", tst.S.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if _, err := os.Lstat(file0); !os.IsNotExist(err) {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestDeletefNotRoot(t *testing.T) {
@@ -2280,7 +2360,7 @@ func TestDeletefNotRoot(t *testing.T) {
 	tst.WithNewFileF(t, file0, nil)
 	err := os.Chmod(dir0, 0500)
 	tst.ErrFatal(t, err)
-	tst.Htreq(t, "DELETE", tst.S.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "DELETE", tst.S.URL+"/delete/dir0/file0", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2297,33 +2377,44 @@ func TestMkdirf(t *testing.T) {
 	dir := path.Join(dn, "mkdir")
 	tst.RemoveIfExistsF(t, dir)
 	tst.EnsureDirF(t, dir)
-	dir0 := path.Join(dir, "dir0")
-	tst.EnsureDirF(t, dir0)
 
 	// doesn't exist, created
-	dir1 := path.Join(dir0, "dir1")
-	tst.RemoveIfExistsF(t, dir1)
-	tst.Htreq(t, "MKDIR", tst.S.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(dir1); err != nil {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		dir0 := path.Join(dir, "dir0")
+		tst.EnsureDirF(t, dir0)
+		dir1 := path.Join(dir0, "dir1")
+		tst.RemoveIfExistsF(t, dir1)
+		htr(t, "MKDIR", tst.S.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if _, err := os.Lstat(dir1); err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// exists, not touched
-	tst.EnsureDirF(t, dir1)
-	file0 := path.Join(dir1, "file0")
-	tst.WithNewFileF(t, file0, nil)
-	tst.Htreq(t, "MKDIR", tst.S.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(file0); err != nil {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		dir0 := path.Join(dir, "dir0")
+		tst.EnsureDirF(t, dir0)
+		dir1 := path.Join(dir0, "dir1")
+		tst.EnsureDirF(t, dir1)
+		file0 := path.Join(dir1, "file0")
+		tst.WithNewFileF(t, file0, nil)
+		htr(t, "MKDIR", tst.S.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if _, err := os.Lstat(file0); err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestMkdirfNotRoot(t *testing.T) {
@@ -2345,7 +2436,7 @@ func TestMkdirfNotRoot(t *testing.T) {
 	err := os.Chmod(dir0, 0500)
 	tst.ErrFatal(t, err)
 	dir1 := path.Join(dir0, "dir1")
-	tst.Htreq(t, "MKDIR", tst.S.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "MKDIR", tst.S.URL+"/mkdir/dir0/dir1", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2361,17 +2452,17 @@ func TestNoCmd(t *testing.T) {
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		noCmd(w, r, func(w http.ResponseWriter, r *http.Request) {})
 	}
-	tst.Htreq(t, "GET", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "GET", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2411,7 +2502,7 @@ func TestQueryNoCmd(t *testing.T) {
 
 	// no query
 	testQuery = make(url.Values)
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2419,7 +2510,7 @@ func TestQueryNoCmd(t *testing.T) {
 
 	// invalid query format
 	testQuery = make(url.Values)
-	tst.Htreq(t, "GET", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2428,7 +2519,7 @@ func TestQueryNoCmd(t *testing.T) {
 	// contains query, command
 	testQuery = make(url.Values)
 	testQuery.Set("param", "some")
-	tst.Htreq(t, "GET", tst.S.URL+"?param=some&cmd=somecmd", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?param=some&cmd=somecmd", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2437,7 +2528,7 @@ func TestQueryNoCmd(t *testing.T) {
 	// contains query
 	testQuery = make(url.Values)
 	testQuery.Set("param", "some")
-	tst.Htreq(t, "GET", tst.S.URL+"?param=some", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?param=some", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2475,7 +2566,7 @@ func TestNew(t *testing.T) {
 func TestOptionsHandler(t *testing.T) {
 	ht := newHandler(t, &testSettings{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
-	tst.Htreq(t, "OPTIONS", tst.S.URL, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "OPTIONS", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
 			!verifyHeader(map[string][]string{"Content-Length": []string{"0"}}, rsp.Header) {
 			t.Fail()
@@ -2489,12 +2580,12 @@ func TestProps(t *testing.T) {
 	fn := "some-file"
 	p := path.Join(dn, fn)
 	tst.WithNewFileF(t, p, nil)
-	tst.Htreq(t, "PROPS", tst.S.URL+"/"+fn, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PROPS", tst.S.URL+"/"+fn, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "PROPS", tst.S.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PROPS", tst.S.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2507,13 +2598,17 @@ func TestModprops(t *testing.T) {
 	fn := "some-file"
 	p := path.Join(dn, fn)
 	tst.WithNewFileF(t, p, nil)
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
-		func(rsp *http.Response) {
-			if rsp.StatusCode != http.StatusOK {
-				t.Fail()
-			}
-		})
-	tst.Htreq(t, "MODPROPS", tst.S.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		htr(t, "MODPROPS", tst.S.URL+"/"+fn, bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0777)),
+			func(rsp *http.Response) {
+				if rsp.StatusCode != http.StatusOK {
+					t.Fail()
+				}
+			})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
+	tst.Htreqx(t, "MODPROPS", tst.S.URL+"/"+fn+"?cmd=anything", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2525,30 +2620,34 @@ func TestPut(t *testing.T) {
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// invalid command
-	tst.Htreq(t, "PUT", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "PUT", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// put
-	p := path.Join(dn, "some-file")
-	tst.RemoveIfExistsF(t, p)
-	tst.Htreq(t, "PUT", tst.S.URL+"/some-file", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		_, err := os.Lstat(p)
-		if err != nil {
-			t.Fail()
-		}
-	})
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		p := path.Join(dn, "some-file")
+		tst.RemoveIfExistsF(t, p)
+		htr(t, "PUT", tst.S.URL+"/some-file", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			_, err := os.Lstat(p)
+			if err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestSearch(t *testing.T) {
 	ht := newHandler(t, &testSettings{root: dn}).(*handler)
 	tst.Thnd.Sh = ht.ServeHTTP
-	tst.Htreq(t, "SEARCH", tst.S.URL+"?cmd=search", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "SEARCH", tst.S.URL+"?cmd=search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2556,7 +2655,7 @@ func TestSearch(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		tst.WithNewFileF(t, path.Join(dn, fmt.Sprintf("file%d", i)), nil)
 	}
-	tst.Htreq(t, "SEARCH", tst.S.URL+"?max=3", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "SEARCH", tst.S.URL+"?max=3", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2576,14 +2675,14 @@ func TestCopy(t *testing.T) {
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// invalid query
-	tst.Htreq(t, "COPY", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// invalid command
-	tst.Htreq(t, "COPY", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "COPY", tst.S.URL+"?cmd=some", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2595,22 +2694,22 @@ func TestGet(t *testing.T) {
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// cmd can be props or search only
-	tst.Htreq(t, "GET", tst.S.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "GET", tst.S.URL+"?cmd=search&cmd=props", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?cmd=search&cmd=props", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "GET", tst.S.URL+"?cmd=search", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?cmd=search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
 	})
-	tst.Htreq(t, "GET", tst.S.URL+"?cmd=props", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"?cmd=props", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2621,7 +2720,7 @@ func TestGet(t *testing.T) {
 	p := path.Join(dn, fn)
 	url := tst.S.URL + "/" + fn
 	tst.RemoveIfExistsF(t, p)
-	tst.Htreq(t, "GET", url, nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusNotFound {
 			t.Fail()
 		}
@@ -2637,7 +2736,7 @@ func TestGet(t *testing.T) {
 		_, err := f.Write(c)
 		return err
 	})
-	tst.Htreq(t, "GET", tst.S.URL+"/search", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"/search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2651,7 +2750,7 @@ func TestGet(t *testing.T) {
 	})
 
 	// file otherwise
-	tst.Htreq(t, "GET", tst.S.URL+"/search/some-file", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "GET", tst.S.URL+"/search/some-file", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()
 		}
@@ -2668,14 +2767,14 @@ func TestPostHandler(t *testing.T) {
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// invalid query
-	tst.Htreq(t, "POST", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "POST", tst.S.URL+"?%%", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
 	})
 
 	// invalid command
-	tst.Htreq(t, "POST", tst.S.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
+	tst.Htreqx(t, "POST", tst.S.URL+"?cmd=invalid", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
 			t.Fail()
 		}
@@ -2684,83 +2783,105 @@ func TestPostHandler(t *testing.T) {
 	dir := path.Join(dn, "post")
 	tst.RemoveIfExistsF(t, dir)
 	tst.EnsureDirF(t, dir)
+	var file string
 
 	// modprops
-	file := path.Join(dir, "file")
-	tst.WithNewFileF(t, file, nil)
-	err := os.Chmod(file, 0600)
-	tst.ErrFatal(t, err)
-	props := map[string]interface{}{"mode": 0660}
-	js, err := json.Marshal(props)
-	tst.Htreq(t, "POST", tst.S.URL+"/post/file?cmd=modprops", bytes.NewBuffer(js), func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		fi, err := os.Lstat(file)
+	f := func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		file = path.Join(dir, "file")
+		tst.WithNewFileF(t, file, nil)
+		err := os.Chmod(file, 0600)
 		tst.ErrFatal(t, err)
-		if fi.Mode() != os.FileMode(0660) {
-			t.Fail()
-		}
-	})
+		props := map[string]interface{}{"mode": 0660}
+		js, err := json.Marshal(props)
+		htr(t, "POST", tst.S.URL+"/post/file?cmd=modprops", bytes.NewBuffer(js), func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			fi, err := os.Lstat(file)
+			tst.ErrFatal(t, err)
+			if fi.Mode() != os.FileMode(0660) {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// delete
-	tst.WithNewFileF(t, file, nil)
-	tst.Htreq(t, "POST", tst.S.URL+"/post/file?cmd=delete", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		_, err := os.Lstat(file)
-		if !os.IsNotExist(err) {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		tst.WithNewFileF(t, file, nil)
+		htr(t, "POST", tst.S.URL+"/post/file?cmd=delete", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			_, err := os.Lstat(file)
+			if !os.IsNotExist(err) {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// mkdir
-	dir0 := path.Join(dir, "dir0")
-	tst.RemoveIfExistsF(t, dir0)
-	tst.Htreq(t, "POST", tst.S.URL+"/post/dir0?cmd=mkdir", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(dir0); err != nil {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		dir0 := path.Join(dir, "dir0")
+		tst.RemoveIfExistsF(t, dir0)
+		htr(t, "POST", tst.S.URL+"/post/dir0?cmd=mkdir", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if _, err := os.Lstat(dir0); err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// copy
-	tst.WithNewFileF(t, file, nil)
-	file0 := path.Join(dir, "file0")
-	tst.RemoveIfExistsF(t, file0)
-	tst.Htreq(t, "POST", tst.S.URL+"/post/file?cmd=copy&to=/post/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(file0); err != nil {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		tst.WithNewFileF(t, file, nil)
+		file0 := path.Join(dir, "file0")
+		tst.RemoveIfExistsF(t, file0)
+		htr(t, "POST", tst.S.URL+"/post/file?cmd=copy&to=/post/file0", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if _, err := os.Lstat(file0); err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 
 	// rename
-	tst.WithNewFileF(t, file, nil)
-	tst.RemoveIfExistsF(t, file0)
-	tst.Htreq(t, "POST", tst.S.URL+"/post/file?cmd=rename&to=/post/file0", nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		if _, err := os.Lstat(file); !os.IsNotExist(err) {
-			t.Fail()
-		}
-		if _, err = os.Lstat(file0); err != nil {
-			t.Fail()
-		}
-	})
+	f = func(htr func(tst.Fataler, string, string, io.Reader, func(*http.Response))) {
+		tst.WithNewFileF(t, file, nil)
+		file0 := path.Join(dir, "file0")
+		tst.RemoveIfExistsF(t, file0)
+		htr(t, "POST", tst.S.URL+"/post/file?cmd=rename&to=/post/file0", nil, func(rsp *http.Response) {
+			if rsp.StatusCode != http.StatusOK {
+				t.Fail()
+			}
+			if _, err := os.Lstat(file); !os.IsNotExist(err) {
+				t.Fail()
+			}
+			if _, err := os.Lstat(file0); err != nil {
+				t.Fail()
+			}
+		})
+	}
+	f(tst.Htreq)
+	f(tst.Htrex)
 }
 
 func TestNotSupported(t *testing.T) {
 	ht := newHandler(t, &testSettings{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 	test := func(method string) {
-		tst.Htreq(t, method, tst.S.URL, nil, func(rsp *http.Response) {
+		tst.Htreqx(t, method, tst.S.URL, nil, func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusMethodNotAllowed {
 				t.Fail()
 			}

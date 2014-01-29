@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	defaultConfigBaseName = ".tasked"
+	defaultConfigBaseName = ".tasked" // not only config
+	defaultSocketBaseName = "sockets"
 	configEnvKey          = "taskedconf"
 	sysConfig             = "/etc/tasked/settings"
 )
@@ -58,13 +59,14 @@ type settings struct {
 	}
 }
 
-func (s *settings) Root() string          { return s.files.root }
-func (s *settings) MaxRequestBody() int64 { return s.http.maxRequestBody }
-func (s *settings) MaxSearchResults() int { return s.files.search.maxResults }
-func (s *settings) AllowCookies() bool { return false }
-func (s *settings) CookieMaxAge() int { return 1024 }
-func (s *settings) MaxProcesses() int { return 1024 }
+func (s *settings) Root() string               { return s.files.root }
+func (s *settings) MaxRequestBody() int64      { return s.http.maxRequestBody }
+func (s *settings) MaxSearchResults() int      { return s.files.search.maxResults }
+func (s *settings) AllowCookies() bool         { return false }
+func (s *settings) CookieMaxAge() int          { return 1024 }
+func (s *settings) MaxProcesses() int          { return 1024 }
 func (s *settings) IdleTimeout() time.Duration { return 1024 }
+func (s *settings) Dirname() string            { return "" }
 
 func readFlags(s *settings) error {
 	flag.StringVar(&s.configFile, "config", "", "")

@@ -22,13 +22,19 @@ type status struct {
 	cleanupFailed bool // false even when killed
 }
 
+type server interface {
+	serve(http.ResponseWriter, *http.Request) error
+}
+
 type proc struct {
 	cmd      *exec.Cmd
-	accessed time.Time
+	proxy   server
 	stdout   chan lineRead
 	stderr   chan lineRead
 	ready    chan int
 	access   chan time.Time
+	laccess  chan time.Time
+	failure  chan int
 	exit     chan int
 }
 
@@ -40,18 +46,23 @@ const (
 
 var (
 	startupMessage   = []byte("ready")
+	command          = os.Args[0]
+	args             []string
 	procClosed       = errors.New("Process closed.")
 	unexpectedExit   = errors.New("Process exited unexpectedly.")
 	startupTimeouted = errors.New("Process startup timeouted.")
 	exitTimeouted    = errors.New("Process exit timeouted.")
+	killSignaled     = errors.New("Process kill signaled.")
+	socketFailure    = errors.New("Socket failure.")
 )
 
-func newProc(cmd *exec.Cmd) *proc {
+func newProc(address string, dialTimeout time.Duration) *proc {
 	p := new(proc)
-	p.cmd = cmd
-	p.accessed = time.Now()
+	p.cmd = exec.Command(command, append(args, "-sock", address)...)
+	p.proxy = &proxy{address: address, timeout: dialTimeout}
 	p.ready = make(chan int)
 	p.access = make(chan time.Time)
+	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
 	return p
 }
@@ -69,32 +80,31 @@ func filterLines(w io.Writer, r io.Reader, l ...[]byte) chan lineRead {
 		br := bufio.NewReader(r)
 		for {
 			lr, err := br.ReadSlice('\n')
-			eof := err == io.EOF
-			if err != nil && !eof {
+			if err != nil && err != io.EOF {
 				c <- lineRead{err: err}
+				close(c)
 				return
 			}
 			found := false
 			for i, li := range ls {
-				if eof {
+				last := len(lr) - 1
+				if last >= 0 && lr[last] != '\n' {
 					li = li[0 : len(li)-1]
 				}
-				if !bytes.Equal(li, lr) {
-					continue
+				if bytes.Equal(li, lr) {
+					found = true
+					c <- lineRead{line: l[i], err: err}
+					break
 				}
-				found = true
-				c <- lineRead{line: l[i]}
-				break
 			}
 			if !found {
-				_, err = w.Write([]byte(lr))
-				if err != nil {
-					c <- lineRead{err: err}
-					return
+				if _, werr := w.Write([]byte(lr)); werr != nil {
+					err = werr
 				}
 			}
-			if eof {
-				c <- lineRead{err: io.EOF}
+			if err != nil {
+				c <- lineRead{err: err}
+				close(c)
 				return
 			}
 		}
@@ -102,10 +112,19 @@ func filterLines(w io.Writer, r io.Reader, l ...[]byte) chan lineRead {
 	return c
 }
 
+func (p *proc) startError(err error) status {
+	close(p.laccess)
+	close(p.ready)
+	return status{errors: []error{err}}
+}
+
 func waitOutput(output chan lineRead) error {
 	for {
-		var l lineRead
-		if l = <-output; l.err == nil {
+		var (
+			l lineRead
+			ok bool
+		)
+		if l, ok = <-output; ok && l.err == nil {
 			continue
 		}
 		if l.err == io.EOF {
@@ -115,32 +134,33 @@ func waitOutput(output chan lineRead) error {
 	}
 }
 
-func (p *proc) waitExit() status {
-	err := p.cmd.Process.Signal(syscall.SIGTERM)
-	if err != nil {
-		return status{cleanupFailed: true, errors: []error{err}}
+func (p *proc) waitExit(signal bool) status {
+	if signal {
+		if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			return status{cleanupFailed: true, errors: []error{err}}
+		}
 	}
 	w := make(chan status)
 	go func() {
-		var (
-			err error
-			s   status
-		)
-		if err = p.cmd.Wait(); err != nil {
-			s.errors = append(s.errors, err)
+		var s status
+		if err := p.cmd.Wait(); err != nil {
 			xerr, ok := err.(*exec.ExitError)
 			switch {
 			case !ok:
+				s.errors = append(s.errors, err)
 				s.cleanupFailed = true
 			case !xerr.Exited():
 				ws, ok := xerr.Sys().(syscall.WaitStatus)
 				s.cleanupFailed = !ok || !ws.Signaled()
+				if s.cleanupFailed {
+					s.errors = append(s.errors, err)
+				}
 			}
 		}
-		if err = waitOutput(p.stdout); err != nil {
+		if err := waitOutput(p.stdout); err != nil {
 			s.errors = append(s.errors, err)
 		}
-		if err = waitOutput(p.stderr); err != nil {
+		if err := waitOutput(p.stderr); err != nil {
 			s.errors = append(s.errors, err)
 		}
 		w <- s
@@ -149,6 +169,9 @@ func (p *proc) waitExit() status {
 	for {
 		select {
 		case s := <-w:
+			if kill {
+				s.errors = append(s.errors, killSignaled)
+			}
 			return s
 		case <-time.After(exitTimeout):
 			if kill {
@@ -166,7 +189,9 @@ func (p *proc) outputError(err error) status {
 	if err == io.EOF {
 		err = unexpectedExit
 	}
-	s := p.waitExit()
+	close(p.laccess)
+	close(p.ready)
+	s := p.waitExit(err != unexpectedExit)
 	s.errors = append(s.errors, err)
 	return s
 }
@@ -177,25 +202,28 @@ func (p *proc) run() status {
 		so, se io.Reader
 	)
 	if so, err = p.cmd.StdoutPipe(); err != nil {
-		close(p.ready)
-		return status{errors: []error{err}}
+		return p.startError(err)
 	}
 	if se, err = p.cmd.StderrPipe(); err != nil {
-		close(p.ready)
-		return status{errors: []error{err}}
+		return p.startError(err)
 	}
 	if err = p.cmd.Start(); err != nil {
-		close(p.ready)
-		return status{errors: []error{err}}
+		return p.startError(err)
 	}
 	p.stdout = filterLines(os.Stdout, so, startupMessage)
 	p.stderr = filterLines(os.Stderr, se)
 	to := time.After(startupTimeout)
 	started := false
+	access := time.Now()
 	for {
 		select {
 		case <-to:
-			s := p.waitExit()
+			if started {
+				break
+			}
+			close(p.laccess)
+			close(p.ready)
+			s := p.waitExit(true)
 			s.errors = append(s.errors, startupTimeouted)
 			return s
 		case l := <-p.stdout:
@@ -207,22 +235,24 @@ func (p *proc) run() status {
 				close(p.ready)
 			}
 		case l := <-p.stderr:
-			if l.err != nil {
-				return p.outputError(l.err)
+			if l.err == nil {
+				break
 			}
-		case t := <-p.access:
-			p.accessed = t
+			return p.outputError(l.err)
+		case access = <-p.access:
+		case p.laccess <- access:
+		case <-p.failure:
+			s := p.waitExit(true)
+			s.errors = append(s.errors, socketFailure)
+			return s
 		case <-p.exit:
+			close(p.laccess)
 			if !started {
 				close(p.ready)
 			}
-			return p.waitExit()
+			return p.waitExit(true)
 		}
 	}
-}
-
-func (p *proc) close() {
-	close(p.exit)
 }
 
 func (p *proc) serve(w http.ResponseWriter, r *http.Request) error {
@@ -230,15 +260,14 @@ func (p *proc) serve(w http.ResponseWriter, r *http.Request) error {
 	select {
 	case <-p.exit:
 		return procClosed
-	default:
-		go func() {
-			select {
-			case <-p.exit:
-				return
-			default:
-				p.access <- time.Now()
-			}
-		}()
-		return nil
+	case p.access <- time.Now():
+		err := p.proxy.serve(w, r)
+		if _, ok := err.(*socketError); ok {
+			p.failure <- 0
+		}
+		return err
 	}
 }
+
+func (p *proc) accessed() time.Time { return <-p.laccess }
+func (p *proc) close() { close(p.exit) }

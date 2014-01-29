@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
+	"strconv"
 	"time"
 )
 
@@ -16,24 +16,24 @@ const (
 	timeout        = "Timeout."
 )
 
-func getToMillisecs() int {
+func getToMillisecs() time.Duration {
 	var (
-		toSecs int
+		toMillisecs int
 		err    error
 	)
 	if len(os.Args) > 2 {
-		toSecs, err = strconv.Atoi(os.Args[2])
+		toMillisecs, err = strconv.Atoi(os.Args[2])
 		if err != nil {
 			log.Fatalln(invalidCommand, err)
 		}
 	} else {
-		toSecs = 12000
+		toMillisecs = 12000
 	}
-	return toSecs
+	return time.Duration(toMillisecs) * time.Millisecond
 }
 
 func wait() {
-	<-time.After(time.Duration(getToMillisecs()) * time.Millisecond)
+	<-time.After(getToMillisecs())
 }
 
 func gulpTerm() {
@@ -42,7 +42,7 @@ func gulpTerm() {
 	for {
 		select {
 		case <-c:
-		case <-time.After(time.Duration(getToMillisecs()) * time.Millisecond):
+		case <-time.After(time.Duration(getToMillisecs())):
 			return
 		}
 	}
@@ -54,10 +54,11 @@ func printWait() {
 			fmt.Println(l)
 		}
 	}
-	<-time.After(time.Duration(getToMillisecs()) * time.Millisecond)
+	<-time.After(time.Duration(getToMillisecs()))
 }
 
 func main() {
+	log.Println(time.Now())
 	if len(os.Args) == 1 {
 		log.Fatalln(missingCommand)
 	}
@@ -72,4 +73,5 @@ func main() {
 	case "printwait":
 		printWait()
 	}
+	log.Println(time.Now())
 }

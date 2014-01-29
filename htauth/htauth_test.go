@@ -1020,7 +1020,6 @@ func TestFilter(t *testing.T) {
 	tst.Htreqr(t, rq, func(rsp *http.Response) {
 		tks := rsp.Header[credXHeaderTokenKey]
 		if len(tks) != 1 || tks[0] != t123 {
-			t.Log("so here", len(tks))
 			t.Fail()
 		}
 	})

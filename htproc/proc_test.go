@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"syscall"
+	// "syscall"
 	"testing"
 	"time"
+	. "code.google.com/p/tasked/testing"
+	"net/http"
 )
 
 type testReader struct {
@@ -25,10 +27,19 @@ type testWriter struct {
 	errIndex   int
 }
 
+type testServer struct {
+	access time.Time
+	closed bool
+	cleanupFail bool
+	waitForClose bool
+	exit chan int
+}
+
 var (
 	testuser  = "testuser"
 	eto       = 30 * time.Millisecond
 	testError = errors.New("test error")
+	testStatus = status{errors: []error{testError}}
 )
 
 func (r *testReader) Read(p []byte) (int, error) {
@@ -71,6 +82,29 @@ func (w *testWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (s *testServer) accessed() time.Time { return s.access }
+
+func (s *testServer) close() {
+	close(s.exit)
+	s.closed = true
+}
+
+func (s *testServer) run() status {
+	if s.waitForClose {
+		s.exit = make(chan int)
+		<-s.exit
+	}
+	ts := testStatus
+	if s.cleanupFail {
+		ts.cleanupFailed = true
+	}
+	return ts
+}
+
+func (s *testServer) serve(w http.ResponseWriter, r *http.Request) error {
+	return testError
+}
+
 func linesEqual(l0, l1 [][]byte) bool {
 	if len(l0) != len(l1) {
 		if len(l0) > len(l1) {
@@ -97,273 +131,274 @@ func lineFeed(l []byte) []byte {
 }
 
 func TestNewProc(t *testing.T) {
-	t0 := time.Now()
-	cmd := exec.Command("")
-	p := newProc(cmd)
-	t1 := time.Now()
-	if p.cmd != cmd {
+	address := "address"
+	to := time.Duration(42)
+	p := newProc(address, to)
+	if p.cmd == nil || p.socket == nil {
 		t.Fail()
 	}
-	if p.accessed.Before(t0) || p.accessed.After(t1) {
+	socket, ok := p.socket.(*socket)
+	if !ok || socket.address != address || socket.timeout != to {
+		t.Fail()
+	}
+	if p.ready == nil ||
+		p.access == nil ||
+		p.laccess == nil ||
+		p.exit == nil {
 		t.Fail()
 	}
 }
 
 func TestFilterLines(t *testing.T) {
 	one, two, three := []byte("one"), []byte("two"), []byte("three")
+
+	// empty stream, waiting for matching line
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{make([]byte, 0)}}, []byte("some"))
+		li := <-lr
+		if li.err != io.EOF || !linesEqual(w.lines, make([][]byte, 0)) {
+			t.Fail()
+		}
+		<-lr
+	})
+
 	// copy one line
-	w := new(testWriter)
-	l := one
-	lr := filterLines(w, &testReader{lines: [][]byte{l}})
-	select {
-	case li := <-lr:
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		l := one
+		lr := filterLines(w, &testReader{lines: [][]byte{l}})
+		li := <-lr
 		if li.err != io.EOF || !linesEqual(w.lines, [][]byte{l}) {
 			t.Fail()
 		}
-	case <-time.After(eto):
-		t.Fail()
-	}
+		<-lr
+	})
 
 	// copy three lines
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}})
-	select {
-	case li := <-lr:
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}})
+		li := <-lr
 		if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, two, three}) {
 			t.Fail()
 		}
-	case <-time.After(eto):
-		t.Fail()
-	}
+		<-lr
+	})
 
 	// find a line
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, two)
-	found := false
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}}, two)
+		found := false
 		for {
-			select {
-			case li := <-lr:
-				if found {
-					if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
-						t.Fail()
-					}
-					return
-				} else {
-					if !bytes.Equal(li.line, two) {
-						t.Fail()
-					}
-					found = true
+			li := <-lr
+			if found {
+				if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
+					t.Fail()
 				}
-			case <-time.After(eto):
-				t.Fail()
+				return
+			} else {
+				if li.err != nil || !bytes.Equal(li.line, two) {
+					t.Fail()
+				}
+				found = true
 			}
 		}
-	}()
+		<-lr
+	})
 
 	// find last line
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, three)
-	found = false
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}}, three)
+		found := false
 		for {
-			select {
-			case li := <-lr:
-				if found {
-					if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, two}) {
-						t.Fail()
-					}
-					return
-				} else {
-					if !bytes.Equal(li.line, three) {
-						t.Fail()
-					}
-					found = true
+			li := <-lr
+			if found {
+				if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, two}) {
+					t.Fail()
 				}
-			case <-time.After(eto):
-				t.Fail()
+				return
+			} else {
+				if !bytes.Equal(li.line, three) {
+					t.Fail()
+				}
+				found = true
 			}
 		}
-	}()
+		<-lr
+	})
 
 	// find a line, with line-break
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, lineFeed(two))
-	found = false
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}}, lineFeed(two))
+		found := false
 		for {
-			select {
-			case li := <-lr:
-				if found {
-					if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
-						t.Fail()
-					}
-					return
-				} else {
-					if !bytes.Equal(li.line, lineFeed(two)) {
-						t.Fail()
-					}
-					found = true
+			li := <-lr
+			if found {
+				if li.err != io.EOF || !linesEqual(w.lines, [][]byte{one, three}) {
+					t.Fail()
 				}
-			case <-time.After(eto):
-				t.Fail()
+				return
+			} else {
+				if !bytes.Equal(li.line, lineFeed(two)) {
+					t.Fail()
+				}
+				found = true
 			}
 		}
-	}()
+		<-lr
+	})
 
 	// find multiple lines
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, lineFeed(two), three)
-	var rl [][]byte
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}}, lineFeed(two), three)
+		var rl [][]byte
 		for {
-			select {
-			case li := <-lr:
-				rl = append(rl, li.line)
-				if li.err != nil {
-					if li.err != io.EOF {
-						t.Fail()
-					}
-					return
+			li := <-lr
+			rl = append(rl, li.line)
+			if li.err != nil {
+				if li.err != io.EOF {
+					t.Fail()
 				}
-			case <-time.After(eto):
-				t.Fail()
+				if !linesEqual(w.lines, [][]byte{one}) || !linesEqual(rl, [][]byte{lineFeed(two), three}) {
+					t.Fail()
+				}
+				return
 			}
 		}
-	}()
-	if !linesEqual(w.lines, [][]byte{one}) || !linesEqual(rl, [][]byte{lineFeed(two), three}) {
-		t.Fail()
-	}
+		<-lr
+	})
 
 	// detect non-eof read error, immediately
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError})
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError})
 		for {
-			select {
-			case li := <-lr:
-				if li.err != testError ||
-					!linesEqual(w.lines, nil) {
-					t.Fail()
-				}
-				return
-			case <-time.After(eto):
+			li := <-lr
+			if li.err != testError ||
+				!linesEqual(w.lines, nil) {
 				t.Fail()
 			}
+			return
 		}
-	}()
+		<-lr
+	})
 
 	// detect non-eof read error
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 4})
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 4})
 		for {
-			select {
-			case li := <-lr:
-				if li.err != testError ||
-					!linesEqual(w.lines, [][]byte{one}) {
-					t.Fail()
-				}
-				return
-			case <-time.After(eto):
+			li := <-lr
+			if li.err != testError ||
+				!linesEqual(w.lines, [][]byte{one}) {
 				t.Fail()
 			}
+			return
 		}
-	}()
+		<-lr
+	})
 
 	// detect non-eof read error, last
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 7})
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 7})
 		for {
-			select {
-			case li := <-lr:
-				if li.err != testError ||
-					!linesEqual(w.lines, [][]byte{one}) && !linesEqual(w.lines, [][]byte{one, two}) {
+			li := <-lr
+			if li.err != testError ||
+				!linesEqual(w.lines, [][]byte{one}) && !linesEqual(w.lines, [][]byte{one, two}) {
+				t.Fail()
+			}
+			return
+		}
+		<-lr
+	})
+
+	// detect non-eof read error, before found
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 1}, two)
+		var rl [][]byte
+		for {
+			li := <-lr
+			rl = append(rl, li.line)
+			if li.err != nil {
+				if li.err != testError {
+					t.Fail()
+				}
+				if !linesEqual(rl, nil) {
 					t.Fail()
 				}
 				return
-			case <-time.After(eto):
-				t.Fail()
 			}
 		}
-	}()
-
-	// detect non-eof read error, before found
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 1}, two)
-	rl = nil
-	func() {
-		for {
-			select {
-			case li := <-lr:
-				rl = append(rl, li.line)
-				if li.err != nil {
-					if li.err != testError {
-						t.Fail()
-					}
-					if !linesEqual(rl, nil) {
-						t.Fail()
-					}
-					return
-				}
-			case <-time.After(eto):
-				t.Fail()
-			}
-		}
-	}()
+		<-lr
+	})
 
 	// detect non-eof read error, after found
-	w = new(testWriter)
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 6}, two)
-	rl = nil
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}, err: testError, errIndex: 6}, two)
+		var rl [][]byte
 		for {
-			select {
-			case li := <-lr:
-				rl = append(rl, li.line)
-				if li.err != nil {
-					if li.err != testError {
-						t.Fail()
-					}
-					if !linesEqual(w.lines, [][]byte{one}) ||
-						!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
-						t.Fail()
-					}
-					return
+			li := <-lr
+			rl = append(rl, li.line)
+			if li.err != nil {
+				if li.err != testError {
+					t.Fail()
 				}
-			case <-time.After(eto):
-				t.Fail()
+				if !linesEqual(w.lines, [][]byte{one}) ||
+					!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
+					t.Fail()
+				}
+				return
 			}
 		}
-	}()
+		<-lr
+	})
 
 	// detect write error
-	w = new(testWriter)
-	w.err = testError
-	w.errIndex = 4
-	lr = filterLines(w, &testReader{lines: [][]byte{one, two, three}}, two)
-	rl = nil
-	func() {
+	WithTimeout(t, eto, func() {
+		w := new(testWriter)
+		w.err = testError
+		w.errIndex = 4
+		lr := filterLines(w, &testReader{lines: [][]byte{one, two, three}}, two)
+		var rl [][]byte
 		for {
-			select {
-			case li := <-lr:
-				rl = append(rl, li.line)
-				if li.err != nil {
-					if li.err != testError {
-						t.Fail()
-					}
-					if len(w.lines) == 0 || !bytes.Equal(w.lines[0], one) ||
-						!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
-						t.Fail()
-					}
-					return
+			li := <-lr
+			rl = append(rl, li.line)
+			if li.err != nil {
+				if li.err != testError {
+					t.Fail()
 				}
-			case <-time.After(eto):
-				t.Fail()
+				if len(w.lines) == 0 || !bytes.Equal(w.lines[0], one) ||
+					!linesEqual(rl, nil) && !linesEqual(rl, [][]byte{two}) {
+					t.Fail()
+				}
+				return
 			}
 		}
-	}()
+		<-lr
+	})
+}
+
+func TestStartError(t *testing.T) {
+	p := &proc{
+		ready: make(chan int),
+		laccess: make(chan time.Time)}
+	e := errors.New("testerror")
+	s := p.startError(e)
+	WithTimeout(t, eto, func() {
+		<-p.ready
+		<-p.laccess
+	})
+	if len(s.errors) != 1 || s.errors[0] != e {
+		t.Fail()
+	}
 }
 
 func TestWaitOutput(t *testing.T) {
@@ -407,6 +442,15 @@ func TestWaitOutput(t *testing.T) {
 	if err != nil {
 		t.Fail()
 	}
+
+	// waiting on closed channel
+	WithTimeout(t, eto, func() {
+		close(c)
+		err = waitOutput(c)
+		if err != nil {
+			t.Fail()
+		}
+	})
 }
 
 func TestWaitExit(t *testing.T) {
@@ -416,194 +460,185 @@ func TestWaitExit(t *testing.T) {
 
 	var (
 		p     *proc
-		err   error
-		s     status
-		found bool
-		ok    bool
-		xerr  *exec.ExitError
-		ws    syscall.WaitStatus
 	)
+
+	// no signal
+	p = new(proc)
+	p.cmd = exec.Command("testproc", "noop")
+	p.stdout = make(chan lineRead)
+	p.stderr = make(chan lineRead)
+	go func() { p.stdout <- lineRead{err: io.EOF} }()
+	go func() { p.stderr <- lineRead{err: io.EOF} }()
+	ErrFatal(t, p.cmd.Start())
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(false)
+		if s.cleanupFailed || len(s.errors) > 0 {
+			t.Fail()
+		}
+	})
+
+	// send signal
+	p = new(proc)
+	p.cmd = exec.Command("testproc", "wait")
+	p.stdout = make(chan lineRead)
+	p.stderr = make(chan lineRead)
+	go func() { p.stdout <- lineRead{err: io.EOF} }()
+	go func() { p.stderr <- lineRead{err: io.EOF} }()
+	ErrFatal(t, p.cmd.Start())
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(true)
+		if s.cleanupFailed || len(s.errors) > 0 {
+			t.Fail()
+		}
+	})
 
 	// sigterm fail
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "noop")
-	err = p.cmd.Run()
-	if err != nil {
-		t.Fatal()
-	}
-	time.Sleep(120 * time.Millisecond)
-	s = p.waitExit()
-	if !s.cleanupFailed || len(s.errors) == 0 {
-		t.Fail()
-	}
+	ErrFatal(t, p.cmd.Run())
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(true)
+		if !s.cleanupFailed || len(s.errors) == 0 {
+			t.Fail()
+		}
+	})
 
 	// sigterm
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", "4500")
-	err = p.cmd.Start()
-	if err != nil {
-		t.Fatal()
-	}
+	ErrFatal(t, p.cmd.Start())
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	time.Sleep(120 * time.Millisecond)
-	s = p.waitExit()
-	if s.cleanupFailed {
-		t.Fail()
-	}
-	xerr = nil
-	for _, err = range s.errors {
-		if xerr, ok = err.(*exec.ExitError); ok {
-			break
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(true)
+		if s.cleanupFailed || len(s.errors) != 0 {
+			t.Fail()
 		}
-		continue
-	}
-	if xerr == nil {
-		t.Fail()
-	}
-	if ws, ok = xerr.Sys().(syscall.WaitStatus); !ok {
-		t.Fail()
-	}
-	if ws.Signaled() && ws.Signal() != syscall.SIGTERM {
-		t.Fail()
-	}
+	})
 
-	// sigkill
+	// sigterm to done
 	p = new(proc)
-	p.cmd = exec.Command("testproc", "gulpterm", "12000")
-	err = p.cmd.Start()
-	if err != nil {
-		t.Fatal()
-	}
+	p.cmd = exec.Command("testproc", "noop")
+	ErrFatal(t, p.cmd.Run())
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	time.Sleep(120 * time.Millisecond)
-	s = p.waitExit()
-	if s.cleanupFailed {
-		t.Fail()
-	}
-	xerr = nil
-	for _, err = range s.errors {
-		if xerr, ok = err.(*exec.ExitError); ok {
-			break
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(true)
+		if !s.cleanupFailed || len(s.errors) != 1 {
+			t.Fail()
 		}
-		continue
-	}
-	if xerr == nil {
-		t.Fail()
-	}
-	if ws, ok = xerr.Sys().(syscall.WaitStatus); !ok {
-		t.Fail()
-	}
-	if ws.Signal() != syscall.SIGKILL {
-		t.Fail()
-	}
+	})
+
+	// sigkill, no sigterm
+	p = new(proc)
+	p.cmd = exec.Command("testproc", "wait")
+	ErrFatal(t, p.cmd.Start())
+	p.stdout = make(chan lineRead)
+	p.stderr = make(chan lineRead)
+	go func() { p.stdout <- lineRead{err: io.EOF} }()
+	go func() { p.stderr <- lineRead{err: io.EOF} }()
+	WithTimeout(t, 2 * exitTimeout, func() {
+		s := p.waitExit(false)
+		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != killSignaled {
+			t.Fail()
+		}
+	})
+
+	// sigkill, after sigterm
+	p = new(proc)
+	p.cmd = exec.Command("testproc", "gulpterm")
+	ErrFatal(t, p.cmd.Start())
+	p.stdout = make(chan lineRead)
+	p.stderr = make(chan lineRead)
+	go func() { p.stdout <- lineRead{err: io.EOF} }()
+	go func() { p.stderr <- lineRead{err: io.EOF} }()
+	WithTimeout(t, 2 * exitTimeout, func() {
+		time.Sleep(120 * time.Millisecond)
+		s := p.waitExit(true)
+		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != killSignaled {
+			t.Fail()
+		}
+	})
 
 	// stdout err
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", "4500")
-	err = p.cmd.Start()
-	if err != nil {
-		t.Fatal()
-	}
+	ErrFatal(t, p.cmd.Start())
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: testError} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	time.Sleep(120 * time.Millisecond)
-	s = p.waitExit()
-	if s.cleanupFailed {
-		t.Fail()
-	}
-	found = false
-	for _, err := range s.errors {
-		if err != testError {
-			continue
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(true)
+		if s.cleanupFailed {
+			t.Fail()
 		}
-		found = true
-		break
-	}
-	if !found {
-		t.Fail()
-	}
+		if len(s.errors) != 1 || s.errors[0] != testError {
+			t.Fail()
+		}
+	})
 
 	// stderr err
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", "4500")
-	err = p.cmd.Start()
-	if err != nil {
-		t.Fatal()
-	}
+	ErrFatal(t, p.cmd.Start())
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: testError} }()
-	time.Sleep(120 * time.Millisecond)
-	s = p.waitExit()
-	if s.cleanupFailed {
-		t.Fail()
-	}
-	found = false
-	for _, err := range s.errors {
-		if err != testError {
-			continue
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(true)
+		if s.cleanupFailed {
+			t.Fail()
 		}
-		found = true
-		break
-	}
-	if !found {
-		t.Fail()
-	}
+		if len(s.errors) != 1 || s.errors[0] != testError {
+			t.Fail()
+		}
+	})
 }
 
 func TestOutputError(t *testing.T) {
 	// eof
 	p := new(proc)
 	p.cmd = exec.Command("testproc", "noop")
+	p.laccess = make(chan time.Time)
+	p.ready = make(chan int)
 	p.cmd.Start()
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	time.Sleep(120 * time.Millisecond)
-	s := p.outputError(io.EOF)
-	found := false
-	for _, e := range s.errors {
-		if e != unexpectedExit {
-			continue
+	WithTimeout(t, eto, func() {
+		s := p.outputError(io.EOF)
+		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != unexpectedExit {
+			t.Fail()
 		}
-		found = true
-		break
-	}
-	if !found {
-		t.Fail()
-	}
+		<-p.laccess
+		<-p.ready
+	})
 
 	// error
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "noop")
+	p.laccess = make(chan time.Time)
+	p.ready = make(chan int)
 	p.cmd.Start()
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	time.Sleep(120 * time.Millisecond)
-	s = p.outputError(testError)
-	found = false
-	for _, e := range s.errors {
-		if e != testError {
-			continue
+	WithTimeout(t, eto, func() {
+		s := p.outputError(testError)
+		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != testError {
+			t.Fail()
 		}
-		found = true
-		break
-	}
-	if !found {
-		t.Fail()
-	}
+		<-p.laccess
+		<-p.ready
+	})
 }
 
 func TestProcRun(t *testing.T) {
@@ -614,131 +649,118 @@ func TestProcRun(t *testing.T) {
 	// start fail
 	p := new(proc)
 	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
 	p.cmd = exec.Command("")
 	s := p.run()
-	if len(s.errors) == 0 {
+	if s.cleanupFailed || len(s.errors) != 1 {
 		t.Fail()
 	}
 
-	// start timeout running
+	// start timeout
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs*2))
-	s = p.run()
-	found := false
-	for _, e := range s.errors {
-		if e != startupTimeouted {
-			continue
+	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
+	WithTimeout(t, 2 * startupTimeout, func() {
+		s = p.run()
+		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != startupTimeouted {
+			t.Fail()
 		}
-		found = true
-		break
-	}
-	if !found {
-		t.Fail()
-	}
+	})
 
 	// exit before timeout
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs/2))
-	s = p.run()
-	found = false
-	for _, e := range s.errors {
-		if e != unexpectedExit {
-			continue
+	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
+	WithTimeout(t, 2 * startupTimeout, func() {
+		s = p.run()
+		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != unexpectedExit {
+			t.Fail()
 		}
-		found = true
-		break
-	}
-	if !found {
-		t.Fail()
-	}
+	})
 
 	// run, exit
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "printwait", "4500", "some message", string(startupMessage), "")
 	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
-	to := make(chan int)
-	go func() {
-		s = p.run()
-		if s.cleanupFailed {
-			t.Fail()
-		}
-		close(to)
-	}()
-	select {
-	case <-p.ready:
+	WithTimeout(t, startupTimeout + exitTimeout, func() {
+		go func() {
+			s = p.run()
+			if s.cleanupFailed || len(s.errors) != 0 {
+				t.Fail()
+			}
+		}()
+		<-p.ready
 		p.close()
-		<-to
-	case <-to:
-		t.Fail()
-	}
+		<-p.laccess
+	})
 
 	// start message twice
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "printwait", "4500", string(startupMessage), string(startupMessage))
 	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
-	to = make(chan int)
-	go func() {
-		s = p.run()
-		if s.cleanupFailed {
-			t.Fail()
-		}
-		close(to)
-	}()
-	select {
-	case <-p.ready:
+	WithTimeout(t, startupTimeout, func() {
+		go func() {
+			s = p.run()
+			if s.cleanupFailed || len(s.errors) != 0 {
+				t.Fail()
+			}
+		}()
+		<-p.ready
 		p.close()
-		<-to
-	case <-to:
-		t.Fail()
-	}
+		<-p.laccess
+	})
 
 	// close before started
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", "4500")
 	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
-	to = make(chan int)
-	go func() {
-		s = p.run()
-		if s.cleanupFailed {
-			t.Fail()
-		}
-		close(to)
-	}()
-	time.Sleep(120 * time.Millisecond)
-	p.close()
-	select {
-	case <-p.ready:
-		<-to
-	case <-time.After(1200 * time.Millisecond):
-		t.Fail()
-	}
+	WithTimeout(t, startupTimeout, func() {
+		go func() {
+			s = p.run()
+			if s.cleanupFailed || len(s.errors) != 0 {
+				t.Fail()
+			}
+		}()
+		p.close()
+		<-p.ready
+		<-p.laccess
+	})
 
 	// update access time
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "printwait", "4500", string(startupMessage))
 	p.ready = make(chan int)
+	p.laccess = make(chan time.Time)
 	p.access = make(chan time.Time)
 	p.exit = make(chan int)
-	now := time.Now()
-	p.accessed = now
-	to = make(chan int)
-	go func() {
-		s = p.run()
-		if s.cleanupFailed {
+	WithTimeout(t, startupTimeout, func() {
+		go func() {
+			s = p.run()
+			if s.cleanupFailed || len(s.errors) != 0 {
+				t.Fail()
+			}
+		}()
+		time.Sleep(120)
+		startTime := <-p.laccess
+		now := time.Now()
+		if !now.After(startTime) {
 			t.Fail()
 		}
-		close(to)
-	}()
-	time.Sleep(120)
-	p.access <- time.Now()
-	p.close()
-	<-to
-	if !p.accessed.After(now) {
-		t.Fail()
-	}
+		p.access <- now
+		nowBack := <-p.laccess
+		if nowBack != now {
+			t.Fail()
+		}
+		p.close()
+	})
 }
 
 func TestServe(t *testing.T) {
@@ -750,31 +772,30 @@ func TestServe(t *testing.T) {
 	p := new(proc)
 	p.ready = make(chan int)
 	p.access = make(chan time.Time)
-	to := make(chan int)
-	go func() {
-		err := p.serve(nil, nil)
-		if err != nil {
-			t.Fail()
-		}
-		close(to)
-	}()
-	close(p.ready)
-	<-p.access
-	<-to
+	p.socket = new(testServer)
+	WithTimeout(t, startupTimeout, func() {
+		go func() {
+			err := p.serve(nil, nil)
+			if err != testError {
+				t.Fail()
+			}
+		}()
+		close(p.ready)
+		<-p.access
+	})
 
 	// exit
 	p = new(proc)
 	p.ready = make(chan int)
 	p.exit = make(chan int)
-	to = make(chan int)
-	go func() {
-		err := p.serve(nil, nil)
-		if err != procClosed {
-			t.Fail()
-		}
-		close(to)
-	}()
-	close(p.exit)
-	close(p.ready)
-	<-to
+	WithTimeout(t, startupTimeout, func() {
+		go func() {
+			err := p.serve(nil, nil)
+			if err != procClosed {
+				t.Fail()
+			}
+		}()
+		close(p.exit)
+		close(p.ready)
+	})
 }

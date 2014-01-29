@@ -5,7 +5,7 @@ import (
 	"syscall"
 )
 
-var IsRoot bool
+var IsRoot bool // make this a function, move the variable to testing
 
 func init() {
 	syscall.Umask(0077)
