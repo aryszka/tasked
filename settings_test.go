@@ -139,8 +139,6 @@ func TestGetSettings(t *testing.T) {
 	err := tst.WithEnv(configEnvKey, p, func() error {
 		s, err := getSettings()
 		if err != nil || s.sec.tokenValidity != 42 {
-			t.Log(err)
-			t.Log(s.sec.tokenValidity)
 			t.Fail()
 		}
 		return nil

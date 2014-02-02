@@ -6,11 +6,11 @@ import (
 	"io"
 	"os/exec"
 	// "syscall"
+	. "code.google.com/p/tasked/testing"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
-	. "code.google.com/p/tasked/testing"
-	"net/http"
-	"fmt"
 )
 
 type testReader struct {
@@ -28,17 +28,17 @@ type testWriter struct {
 }
 
 type testServer struct {
-	access time.Time
-	closed bool
-	cleanupFail bool
+	access       time.Time
+	closed       bool
+	cleanupFail  bool
 	waitForClose bool
-	exit chan int
+	exit         chan int
 }
 
 var (
-	testuser  = "testuser"
-	eto       = 30 * time.Millisecond
-	testError = errors.New("test error")
+	testuser   = "testuser"
+	eto        = 30 * time.Millisecond
+	testError  = errors.New("test error")
 	testStatus = status{errors: []error{testError}}
 )
 
@@ -453,7 +453,7 @@ func TestSignalWait(t *testing.T) {
 	}
 
 	var (
-		p     *proc
+		p *proc
 	)
 
 	// no signal
@@ -535,7 +535,7 @@ func TestSignalWait(t *testing.T) {
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	WithTimeout(t, 2 * exitTimeout, func() {
+	WithTimeout(t, 2*exitTimeout, func() {
 		s := p.signalWait(false)
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != killSignaled {
 			t.Fail()
@@ -550,7 +550,7 @@ func TestSignalWait(t *testing.T) {
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
-	WithTimeout(t, 2 * exitTimeout, func() {
+	WithTimeout(t, 2*exitTimeout, func() {
 		time.Sleep(120 * time.Millisecond)
 		s := p.signalWait(true)
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != killSignaled {
@@ -686,7 +686,7 @@ func TestProcRun(t *testing.T) {
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs*2))
 	p.ready = make(chan int)
-	WithTimeout(t, 2 * startupTimeout, func() {
+	WithTimeout(t, 2*startupTimeout, func() {
 		s = p.run()
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != startupTimeouted {
 			t.Fail()
@@ -697,7 +697,7 @@ func TestProcRun(t *testing.T) {
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs/2))
 	p.ready = make(chan int)
-	WithTimeout(t, 2 * startupTimeout, func() {
+	WithTimeout(t, 2*startupTimeout, func() {
 		s = p.run()
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != unexpectedExit {
 			t.Fail()
@@ -709,7 +709,7 @@ func TestProcRun(t *testing.T) {
 	p.cmd = exec.Command("testproc", "printwait", "4500", "some message", string(startupMessage), "")
 	p.ready = make(chan int)
 	p.exit = make(chan int)
-	WithTimeout(t, startupTimeout + exitTimeout, func() {
+	WithTimeout(t, startupTimeout+exitTimeout, func() {
 		w := Wait(func() {
 			s = p.run()
 			if s.cleanupFailed || len(s.errors) != 0 {

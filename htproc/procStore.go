@@ -4,14 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"path"
 )
 
 const (
-	maxSocketFailures = 6
-	failureRecoveryTime = 6 * time.Second
-	procStoreCloseTimeout = 6 * time.Second
+	maxSocketFailures          = 6
+	failureRecoveryTime        = 6 * time.Second
+	procStoreCloseTimeout      = 6 * time.Second
 	defaultProcIdleCheckPeriod = time.Minute
-	defaultProcIdleTimeout = 12 * time.Minute
+	defaultProcIdleTimeout     = 12 * time.Minute
+	defaultDialTimeout         = 1 * time.Second
 )
 
 type ProcError struct {
@@ -20,19 +22,19 @@ type ProcError struct {
 }
 
 type exitStatus struct {
-	user string
+	user   string
 	proc   runner
 	status status
 }
 
 type getCreateResult struct {
 	proc runner
-	err error
+	err  error
 }
 
 type getCreateProc struct {
 	user string
-	res chan getCreateResult
+	res  chan getCreateResult
 }
 
 type runner interface {
@@ -43,6 +45,8 @@ type runner interface {
 
 type procStore struct {
 	maxProcs int
+	dialTimeout time.Duration
+	socketsDir string
 
 	// todo: make struct for the proc related fields
 	procs    map[string]runner
@@ -50,14 +54,14 @@ type procStore struct {
 	failures map[string][]time.Time
 	banned   map[string]time.Time
 
-	gc       chan getCreateProc
-	px       chan exitStatus
-	exit     chan int
+	gc   chan getCreateProc
+	px   chan exitStatus
+	exit chan int
 }
 
 var (
-	procIdleCheckPeriod = defaultProcIdleCheckPeriod
-	procIdleTimeout = defaultProcIdleTimeout
+	procIdleCheckPeriod     = defaultProcIdleCheckPeriod
+	procIdleTimeout         = defaultProcIdleTimeout
 	procStoreClosed         = errors.New("Proc store closed.")
 	procCleanupFailed       = errors.New("Proc cleanup failed.")
 	procStoreCloseTimeouted = errors.New("Proc store close timeouted.")
@@ -75,6 +79,12 @@ func (pe *ProcError) Fatal() bool {
 func newProcStore(s Settings) *procStore {
 	ps := new(procStore)
 	ps.maxProcs = s.MaxProcesses()
+	if sdto := s.DialTimeout(); sdto > 0 {
+		ps.dialTimeout = sdto
+	} else {
+		ps.dialTimeout = defaultDialTimeout
+	}
+	ps.socketsDir = path.Join(s.Workdir(), "sockets")
 	ps.procs = make(map[string]runner)
 	ps.accessed = make(map[string]time.Time)
 	ps.failures = make(map[string][]time.Time)
@@ -131,7 +141,7 @@ func (ps *procStore) getCreateProc(user string) (runner, error) {
 		}
 		ps.removeProc(ou)
 	}
-	p := newProc(user, 1)
+	p := newProc(path.Join(ps.socketsDir, user), ps.dialTimeout)
 	ps.procs[user] = p
 	ps.accessed[user] = now
 	go func() { ps.px <- exitStatus{user: user, proc: p, status: p.run()} }()

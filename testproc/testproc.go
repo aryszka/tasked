@@ -8,11 +8,18 @@ import (
 	"syscall"
 	"strconv"
 	"time"
+	"io"
+	"path"
+	"net"
+	"net/http"
+	"bytes"
+	"strings"
 )
 
 const (
 	missingCommand = "Missing command."
 	invalidCommand = "Invalid command."
+	missingAddress = "Missing address."
 	timeout        = "Timeout."
 )
 
@@ -57,8 +64,53 @@ func printWait() {
 	<-time.After(time.Duration(getToMillisecs()))
 }
 
+func serve() {
+	if len(os.Args) <= 3 {
+		log.Fatalln(missingAddress)
+	}
+	addr := os.Args[2]
+	readyMsg := os.Args[3]
+	err := os.Remove(addr)
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatalln(err)
+	}
+	l, err := net.Listen("unixpacket", addr)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	go func() {
+		http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var (
+				status int
+				err error
+			)
+			if status, err = strconv.Atoi(path.Base(r.URL.Path)); err != nil {
+				status = 200
+			}
+			buf := bytes.NewBuffer(nil)
+			_, err = io.Copy(buf, r.Body)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			w.Header().Set("Content-Length", fmt.Sprint(buf.Len()))
+			for k, v := range r.Header {
+				if strings.Index(k, "X-") != 0 {
+					continue
+				}
+				w.Header()[k] = v
+			}
+			w.WriteHeader(status)
+			_, err = io.Copy(w, buf)
+			if err != nil {
+				log.Fatalln(err)
+			}
+		}))
+	}()
+	fmt.Println(readyMsg)
+	select {}
+}
+
 func main() {
-	log.Println(time.Now())
 	if len(os.Args) == 1 {
 		log.Fatalln(missingCommand)
 	}
@@ -72,6 +124,7 @@ func main() {
 		gulpTerm()
 	case "printwait":
 		printWait()
+	case "serve":
+		serve()
 	}
-	log.Println(time.Now())
 }

@@ -8,7 +8,9 @@ import (
 
 type Settings interface {
 	MaxProcesses() int
+	DialTimeout() time.Duration
 	IdleTimeout() time.Duration
+	Workdir() string
 }
 
 type ProcFilter struct {

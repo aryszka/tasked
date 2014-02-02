@@ -1,13 +1,13 @@
 package htproc
 
 import (
-	"net/http"
 	"code.google.com/p/tasked/share"
+	. "code.google.com/p/tasked/share"
+	"io"
 	"net"
+	"net/http"
 	"net/http/httputil"
 	"time"
-	"io"
-	. "code.google.com/p/tasked/share"
 )
 
 type proxy struct {
@@ -15,13 +15,13 @@ type proxy struct {
 	timeout time.Duration
 }
 
-func (s *proxy) serve(w http.ResponseWriter, r *http.Request) error {
+func (p *proxy) serve(w http.ResponseWriter, r *http.Request) error {
 	rr, err := http.NewRequest(r.Method, r.URL.Path+"?"+r.URL.RawQuery, r.Body)
 	if !CheckHandle(w, err == nil, http.StatusNotFound) {
 		return err
 	}
 	rr.Header = r.Header
-	nc, err := net.DialTimeout("unixpacket", s.address, s.timeout)
+	nc, err := net.DialTimeout("unixpacket", p.address, p.timeout)
 	if !CheckHandle(w, err == nil, http.StatusNotFound) {
 		return err
 	}

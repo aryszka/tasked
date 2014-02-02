@@ -1,18 +1,18 @@
 package htproc
 
 import (
-	"testing"
-	"path"
-	tst "code.google.com/p/tasked/testing"
-	"net/http"
-	"io/ioutil"
 	"bytes"
+	tst "code.google.com/p/tasked/testing"
+	"io/ioutil"
+	"net/http"
+	"path"
+	"testing"
 )
 
 func TestServeProxy(t *testing.T) {
 	var (
-		s = &proxy{address: path.Join(tst.Testdir, "sockets/default")}
-		hello = []byte("hello")
+		s      = &proxy{address: path.Join(tst.Testdir, "sockets/default")}
+		hello  = []byte("hello")
 		hello2 = []byte("hellohello")
 	)
 
@@ -22,7 +22,7 @@ func TestServeProxy(t *testing.T) {
 	defer sx.Close()
 
 	// ok, empty
-	tst.Thndx.Sh = func(w http.ResponseWriter, r *http.Request){}
+	tst.Thndx.Sh = func(w http.ResponseWriter, r *http.Request) {}
 	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK {
 			t.Fail()

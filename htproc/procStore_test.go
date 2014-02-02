@@ -1,11 +1,11 @@
 package htproc
 
 import (
+	. "code.google.com/p/tasked/testing"
 	"errors"
 	"strings"
 	"testing"
 	"time"
-	. "code.google.com/p/tasked/testing"
 )
 
 func TestProcError(t *testing.T) {
@@ -281,12 +281,14 @@ func TestProcErrors(t *testing.T) {
 	ps.failures = make(map[string][]time.Time)
 	ps.banned = make(map[string]time.Time)
 	now = time.Now()
-	for i := 0; i < maxSocketFailures; i++ { ps.failures["user0"] = append(ps.failures["user0"], now) }
+	for i := 0; i < maxSocketFailures; i++ {
+		ps.failures["user0"] = append(ps.failures["user0"], now)
+	}
 	ps.procErrors("user0", []error{testError}, nil)
 	if len(ps.failures["user0"]) != 0 || ps.banned["user0"].Before(now) {
 		t.Fail()
 	}
-	
+
 	// notify
 	ps = new(procStore)
 	ps.failures = make(map[string][]time.Time)
@@ -360,7 +362,7 @@ func TestCloseAll(t *testing.T) {
 	p1 = &testServer{exit: make(chan int)}
 	p1.cleanupFail = true
 	ps.procs["user1"] = p1
-	WithTimeout(t, 2 * procStoreCloseTimeout, func() {
+	WithTimeout(t, 2*procStoreCloseTimeout, func() {
 		go func() { ps.px <- exitStatus{proc: p0, status: p0.run()} }()
 		err := ps.closeAll(nil)
 		if err != procStoreCloseTimeouted || !p0.closed || !p1.closed {
@@ -440,7 +442,7 @@ func TestCleanupFailures(t *testing.T) {
 }
 
 func TestProcStoreRun(t *testing.T) {
-	if (!testLong) {
+	if !testLong {
 		t.Skip()
 	}
 

@@ -27,13 +27,13 @@ type server interface {
 }
 
 type proc struct {
-	cmd      *exec.Cmd
+	cmd     *exec.Cmd
 	proxy   server
-	stdout   chan lineRead
-	stderr   chan lineRead
-	ready    chan int
-	failure  chan int
-	exit     chan int
+	stdout  chan lineRead
+	stderr  chan lineRead
+	ready   chan int
+	failure chan int
+	exit    chan int
 }
 
 const (
@@ -117,7 +117,7 @@ func (p *proc) startError(err error) status {
 func waitOutput(output chan lineRead) error {
 	for {
 		var (
-			l lineRead
+			l  lineRead
 			ok bool
 		)
 		if l, ok = <-output; ok && l.err == nil {

@@ -8,7 +8,6 @@ import (
 	"mime"
 	"net/http"
 	"strings"
-	"log"
 )
 
 const (
@@ -282,7 +281,6 @@ func (a *filter) Filter(w http.ResponseWriter, r *http.Request, _ interface{}) (
 		if isAuth {
 			share.ErrorResponse(w, http.StatusNotFound)
 		}
-		log.Println("here", len(tn), len(user), err)
 		return nil, isAuth
 	}
 
