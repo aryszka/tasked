@@ -4,7 +4,6 @@ import (
 	"code.google.com/p/tasked/htauth"
 	"code.google.com/p/tasked/htfile"
 	"code.google.com/p/tasked/htproc"
-	"code.google.com/p/tasked/htsocket"
 	"code.google.com/p/tasked/share"
 	"log"
 	"net/http"
@@ -31,15 +30,8 @@ func main() {
 			log.Panicln(err)
 		}
 		hp := htproc.New(s)
-		hs := htsocket.New(s)
-		ps := share.CascadeFilters(hp, hs)
-		hnd = share.CascadeFilters(ha,
-			share.SelectFilter(func(d interface{}) share.HttpFilter {
-				if u, ok := d.(string); ok && len(u) > 0 {
-					return ps
-				}
-				return hf
-			}))
+		hp.Run(nil)
+		hnd = share.CascadeFilters(ha, hp, hf)
 	} else {
 		hnd = hf
 	}

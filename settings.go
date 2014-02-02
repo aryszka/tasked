@@ -67,6 +67,7 @@ func (s *settings) CookieMaxAge() int          { return 1024 }
 func (s *settings) MaxProcesses() int          { return 1024 }
 func (s *settings) IdleTimeout() time.Duration { return 1024 }
 func (s *settings) Workdir() string            { return "" }
+func (s *settings) DialTimeout() time.Duration { return 3 * time.Second }
 
 func readFlags(s *settings) error {
 	flag.StringVar(&s.configFile, "config", "", "")
