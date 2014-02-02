@@ -20,33 +20,38 @@ type ProcError struct {
 }
 
 type exitStatus struct {
+	user string
 	proc   runner
 	status status
 }
 
-type addProc struct {
-	user string
+type getCreateResult struct {
 	proc runner
-	err chan error
+	err error
+}
+
+type getCreateProc struct {
+	user string
+	res chan getCreateResult
 }
 
 type runner interface {
 	server
 	run() status
-	accessed() time.Time
 	close()
 }
 
-type procMap map[string]runner
-
 type procStore struct {
 	maxProcs int
-	failures map[string]int
+
+	// todo: make struct for the proc related fields
+	procs    map[string]runner
+	accessed map[string]time.Time
+	failures map[string][]time.Time
 	banned   map[string]time.Time
-	m        chan procMap
-	ad       chan addProc
-	rm       chan runner
-	procExit chan exitStatus
+
+	gc       chan getCreateProc
+	px       chan exitStatus
 	exit     chan int
 }
 
@@ -70,91 +75,110 @@ func (pe *ProcError) Fatal() bool {
 func newProcStore(s Settings) *procStore {
 	ps := new(procStore)
 	ps.maxProcs = s.MaxProcesses()
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
-	ps.rm = make(chan runner)
-	ps.procExit = make(chan exitStatus)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	ps.failures = make(map[string][]time.Time)
+	ps.banned = make(map[string]time.Time)
+	ps.gc = make(chan getCreateProc)
+	ps.px = make(chan exitStatus)
 	ps.exit = make(chan int)
 	return ps
 }
 
-func (ps *procStore) runProc(p runner) {
-	s := p.run()
-	ps.procExit <- exitStatus{proc: p, status: s}
+func (ps *procStore) removeProc(u string) {
+	p, ok := ps.procs[u]
+	if !ok {
+		return
+	}
+	delete(ps.procs, u)
+	delete(ps.accessed, u)
+	p.close()
 }
 
-func (ps *procStore) addProc(m procMap, user string, p runner) procMap {
-	if _, ok := m[user]; ok {
-		return m
-	}
-	var (
-		oldestUser string
-		oldestProc runner
-		oldestAccess time.Time
-	)
-	nm := make(procMap)
-	for u, p := range m {
-		nm[u] = p
-		accessed := p.accessed()
-		if oldestProc == nil || accessed.Before(oldestAccess) {
-			oldestProc, oldestUser, oldestAccess = p, u, accessed
+func (ps *procStore) removeIdle(now time.Time) {
+	for u, _ := range ps.procs {
+		if now.Sub(ps.accessed[u]) < procIdleTimeout {
+			continue
 		}
+		ps.removeProc(u)
 	}
-	if ps.maxProcs > 0 && len(nm) >= ps.maxProcs {
-		oldestProc.close()
-		delete(nm, oldestUser)
-	}
-	go ps.runProc(p)
-	nm[user] = p
-	return nm
 }
 
-func removeProcs(m procMap, p ...runner) procMap {
-	nm := make(procMap)
-	for u, pi := range m {
+func (ps *procStore) getCreateProc(user string) (runner, error) {
+	now := time.Now()
+	if p, ok := ps.procs[user]; ok {
+		ps.accessed[user] = now
+		return p, nil
+	}
+	if bt, ok := ps.banned[user]; ok && now.Sub(bt) < failureRecoveryTime {
+		return nil, temporarilyBanned
+	} else if ok {
+		delete(ps.banned, user)
+	}
+	ps.removeIdle(now)
+	if ps.maxProcs > 0 && len(ps.procs) >= ps.maxProcs {
 		var (
-			remove bool
-			idx int
+			ou string
+			oa = now
 		)
-		for i, pii := range p {
-			if pi != pii {
+		for u, _ := range ps.procs {
+			a := ps.accessed[u]
+			if a.After(oa) {
 				continue
 			}
-			remove = true
-			idx = i
+			ou = u
+			oa = a
+		}
+		ps.removeProc(ou)
+	}
+	p := newProc(user, 1)
+	ps.procs[user] = p
+	ps.accessed[user] = now
+	go func() { ps.px <- exitStatus{user: user, proc: p, status: p.run()} }()
+	return p, nil
+}
+
+func discardFailures(failures []time.Time, now time.Time) []time.Time {
+	for len(failures) > 0 {
+		if now.Sub(failures[0]) < failureRecoveryTime {
 			break
 		}
-		if remove {
-			pi.close()
-			p = append(p[:idx], p[idx + 1:]...)
-			continue
-		}
-		nm[u] = pi
+		failures = failures[1:]
 	}
-	return nm
+	return failures
 }
 
-func findUser(m procMap, p runner) string {
-	for u, pi := range m {
-		if pi != p {
-			continue
-		}
-		return u
+func (ps *procStore) procErrors(user string, errs []error, notify chan error) {
+	if len(errs) == 0 {
+		return
 	}
-	return ""
+	now := time.Now()
+	fs := discardFailures(ps.failures[user], now)
+	if len(fs) < maxSocketFailures {
+		ps.failures[user] = append(fs, now)
+	} else {
+		delete(ps.failures, user)
+		ps.banned[user] = now
+	}
+	if notify == nil {
+		return
+	}
+	for _, err := range errs {
+		notify <- &ProcError{User: user, Err: err}
+	}
 }
 
-func (ps *procStore) closeAll(m procMap, procErrors chan error) error {
+func (ps *procStore) closeAll(procErrors chan error) error {
 	pu := make(map[runner]string)
-	for u, p := range m {
+	for u, p := range ps.procs {
 		pu[p] = u
 		p.close()
 	}
-	c := len(m)
+	c := len(ps.procs)
 	waitAll := make(chan error)
 	go func() {
 		for c > 0 {
-			s := <-ps.procExit
+			s := <-ps.px
 			c--
 			if procErrors != nil {
 				user, _ := pu[s.proc]
@@ -177,103 +201,51 @@ func (ps *procStore) closeAll(m procMap, procErrors chan error) error {
 	}
 }
 
+func (ps *procStore) cleanupFailures(now time.Time) {
+	for u, fs := range ps.failures {
+		ps.failures[u] = discardFailures(fs, now)
+	}
+	nb := make(map[string]time.Time)
+	for u, b := range ps.banned {
+		if now.Sub(b) > failureRecoveryTime {
+			continue
+		}
+		nb[u] = b
+	}
+	ps.banned = nb
+}
+
 func (ps *procStore) run(procErrors chan error) error {
-	m := make(procMap)
-	f := make(map[string]int)
-	b := make(map[string]time.Time)
 	idleCheck := time.After(procIdleCheckPeriod)
 	for {
 		select {
-		case ps.m <- m:
-		case ad := <-ps.ad:
-			if bt, ok := b[ad.user]; ok && time.Now().Sub(bt) < failureRecoveryTime {
-				ad.err <- temporarilyBanned
-				break
-			} else if ok {
-				delete(b, ad.user)
-			}
-			m = ps.addProc(m, ad.user, ad.proc)
-			ad.err <- nil
-		case p := <-ps.rm:
-			m = removeProcs(m, p)
-		case s := <-ps.procExit:
-			user := findUser(m, s.proc)
-			m = removeProcs(m, s.proc)
-			for _, err := range s.status.errors {
-				if err == socketFailure {
-					failures := f[user]
-					if failures < maxSocketFailures {
-						f[user] = failures + 1
-					} else {
-						delete(f, user)
-						b[user] = time.Now()
-					}
-					if procErrors == nil {
-						break
-					}
-				}
-				if procErrors != nil {
-					procErrors <- &ProcError{User: user, Err: err}
-				}
-			}
+		case gc := <-ps.gc:
+			p, err := ps.getCreateProc(gc.user)
+			gc.res <- getCreateResult{proc: p, err: err}
+		case s := <-ps.px:
+			ps.removeProc(s.user)
+			ps.procErrors(s.user, s.status.errors, procErrors)
 			if s.status.cleanupFailed {
-				return &ProcError{User: user, Err: procCleanupFailed}
+				return &ProcError{User: s.user, Err: procCleanupFailed}
 			}
 		case now := <-idleCheck:
-			var remove []runner
-			for _, p := range m {
-				if now.Sub(p.accessed()) < procIdleTimeout {
-					continue
-				}
-				remove = append(remove, p)
-			}
-			m = removeProcs(m, remove...)
+			ps.removeIdle(now)
+			ps.cleanupFailures(now)
 			idleCheck = time.After(procIdleCheckPeriod)
 		case <-ps.exit:
-			return ps.closeAll(m, procErrors)
+			return ps.closeAll(procErrors)
 		}
 	}
 }
 
-func (ps *procStore) getMap() (procMap, error) {
+func (ps *procStore) getCreate(user string) (runner, error) {
+	rc := make(chan getCreateResult)
 	select {
 	case <-ps.exit:
 		return nil, procStoreClosed
-	case m := <-ps.m:
-		return m, nil
-	}
-}
-
-func (ps *procStore) create(user string) (runner, error) {
-	p := newProc(user, 1)
-	err := make(chan error)
-	select {
-	case <-ps.exit:
-		return nil, procStoreClosed
-	case ps.ad <- addProc{user: user, proc: p, err: err}:
-		return p, <-err
-	}
-}
-
-func (ps *procStore) get(user string) (runner, error) {
-	for {
-		m, err := ps.getMap()
-		if err != nil {
-			return nil, err
-		}
-		if p, ok := m[user]; ok {
-			return p, nil
-		}
-		return ps.create(user)
-	}
-}
-
-func (ps *procStore) remove(p runner) error {
-	select {
-	case <-ps.exit:
-		return procStoreClosed
-	case ps.rm <- p:
-		return nil
+	case ps.gc <- getCreateProc{user: user, res: rc}:
+		res := <-rc
+		return res.proc, res.err
 	}
 }
 

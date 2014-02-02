@@ -330,3 +330,12 @@ func WithTimeout(t Fataler, to time.Duration, f func()) {
 		t.Fatal("test timeouted")
 	}
 }
+
+func Wait(f func()) chan int {
+	w := make(chan int)
+	go func() {
+		f()
+		w <- 0
+	}()
+	return w
+}

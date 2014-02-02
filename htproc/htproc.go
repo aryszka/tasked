@@ -36,7 +36,7 @@ func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{
 		return d, false
 	}
 	for {
-		p, err := f.procStore.get(u)
+		p, err := f.procStore.getCreate(u)
 		if !CheckHandle(w, err != procStoreClosed && err != temporarilyBanned, http.StatusNotFound) ||
 			!CheckServerError(w, err == nil) {
 			return d, true
@@ -45,15 +45,10 @@ func (f *ProcFilter) Filter(w http.ResponseWriter, r *http.Request, d interface{
 		if err == nil {
 			return d, true
 		}
-		if serr, ok := err.(*socketError); ok {
-			if !serr.handled {
-				ErrorResponse(w, http.StatusNotFound)
-			}
+		if err != procClosed {
 			return d, true
 		}
-		if !CheckServerError(w, err == procClosed) {
-			return d, true
-		}
+		// todo: diag log non procClosed errors
 	}
 }
 

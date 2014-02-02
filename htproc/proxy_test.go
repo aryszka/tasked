@@ -7,22 +7,16 @@ import (
 	"net/http"
 	"io/ioutil"
 	"bytes"
-	"code.google.com/p/tasked/share"
 )
 
-func TestServeSocket(t *testing.T) {
+func TestServeProxy(t *testing.T) {
 	var (
-		s = &socket{address: path.Join(tst.Testdir, "sockets/default")}
+		s = &proxy{address: path.Join(tst.Testdir, "sockets/default")}
 		hello = []byte("hello")
 		hello2 = []byte("hellohello")
 	)
 
-	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
-		err := s.serve(w, r)
-		if err != nil {
-			share.ErrorResponse(w, http.StatusNotFound)
-		}
-	}
+	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) { s.serve(w, r) }
 	sx, err := tst.StartSocketServer(s.address)
 	tst.ErrFatal(t, err)
 	defer sx.Close()

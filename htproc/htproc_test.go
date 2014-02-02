@@ -1,7 +1,7 @@
 package htproc
 
 import (
-	tst "code.google.com/p/tasked/testing"
+	. "code.google.com/p/tasked/testing"
 	"net/http"
 	"testing"
 	"time"
@@ -39,30 +39,28 @@ func TestNew(t *testing.T) {
 func TestFilter(t *testing.T) {
 	t.Skip()
 	p := New(&testSettings{})
-	to := make(chan int)
-	go func() {
+	w := Wait(func() {
 		err := p.Run(nil)
 		if err != nil {
 			t.Fail()
 		}
-		to <- 0
-	}()
+	})
 	var (
 		data    interface{}
 		handled bool
 	)
-	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
+	Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		data, handled = p.Filter(w, r, data)
 	}
 
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+	Htreq(t, "GET", S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != 200 || handled {
 			t.Fail()
 		}
 	})
 
 	data = "user0"
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+	Htreq(t, "GET", S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != 200 || !handled {
 			t.Fail()
 		}
@@ -70,32 +68,30 @@ func TestFilter(t *testing.T) {
 
 	p.procStore.close()
 	data = "user0"
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+	Htreq(t, "GET", S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != 404 || !handled {
 			t.Fail()
 		}
 	})
-	<-to
+	<-w
 }
 
 func TestServeHTTP(t *testing.T) {
 	t.Skip()
 	p := New(&testSettings{})
-	to := make(chan int)
-	go func() {
+	w := Wait(func() {
 		err := p.Run(nil)
 		if err != nil {
 			t.Fail()
 		}
-		to <- 0
-	}()
-	tst.Thnd.Sh = p.ServeHTTP
+	})
+	Thnd.Sh = p.ServeHTTP
 
-	tst.Htreq(t, "GET", tst.S.URL, nil, func(rsp *http.Response) {
+	Htreq(t, "GET", S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != 404 {
 			t.Fail()
 		}
 	})
 	p.procStore.close()
-	<-to
+	<-w
 }

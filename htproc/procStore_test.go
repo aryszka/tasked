@@ -24,103 +24,36 @@ func TestProcError(t *testing.T) {
 	}
 }
 
-func TestNewPorcStore(t *testing.T) {
+func TestNewProcStore(t *testing.T) {
 	ps := newProcStore(&testSettings{maxProcesses: 12})
 	if ps.maxProcs != 12 {
 		t.Fail()
 	}
-	if ps.m == nil || ps.ad == nil || ps.rm == nil || ps.procExit == nil || ps.exit == nil {
+	if ps.procs == nil || ps.accessed == nil || ps.failures == nil || ps.banned == nil ||
+		ps.gc == nil || ps.px == nil || ps.exit == nil {
 		t.Fail()
 	}
 }
 
-func TestRunProc(t *testing.T) {
-	ps := new(procStore)
-	ps.procExit = make(chan exitStatus)
-	p := new(testServer)
-	go ps.runProc(p)
-	s := <-ps.procExit
-	if s.proc != p || len(s.status.errors) != 1 || s.status.errors[0] != testError {
-		t.Fail()
-	}
-}
-
-func TestAddProc(t *testing.T) {
-	// try add existing
-	ps := new(procStore)
-	m := make(procMap)
-	p0 := new(testServer)
-	m["user0"] = p0
-	m["user1"] = new(testServer)
-	p0i := new(testServer)
-	m = ps.addProc(m, "user0", p0i)
-	if len(m) != 2 || m["user0"] != p0 {
-		t.Fail()
-	}
-
-	// add new
-	ps = new(procStore)
-	ps.maxProcs = 2
-	ps.procExit = make(chan exitStatus)
-	m = make(procMap)
-	m["user0"] = new(testServer)
-	p1 := new(testServer)
-	m = ps.addProc(m, "user1", p1)
-	if len(m) != 2 || m["user1"] != p1 {
-		t.Fail()
-	}
-	WithTimeout(t, eto, func() {
-		s := <-ps.procExit
-		if s.proc != m["user1"] {
-			t.Fail()
-		}
-	})
-
-	// add new, remove oldest
-	ps = new(procStore)
-	ps.maxProcs = 2
-	ps.procExit = make(chan exitStatus)
-	m = make(procMap)
-	now := time.Now()
-	p0 = new(testServer)
-	p0.exit = make(chan int)
-	m["user0"] = p0
-	p0.access = now.Add(-1 * time.Second)
-	p1 = new(testServer)
-	p1.exit = make(chan int)
-	m["user1"] = p1
-	p1.access = now
-	p2 := new(testServer)
-	p2.exit = make(chan int)
-	m = ps.addProc(m, "user2", p2)
-	if len(m) != 2 || m["user1"] != p1 || m["user2"] != p2 {
-		t.Fail()
-	}
-	WithTimeout(t, eto, func() {
-		<-ps.procExit
-		if !p0.closed {
-			t.Fail()
-		}
-	})
-}
-
-func TestRemoveProcs(t *testing.T) {
+func TestRemoveProc(t *testing.T) {
 	// no proc in map
-	m := make(procMap)
-	m = removeProcs(m, new(testServer))
-	if len(m) != 0 {
+	ps := new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.removeProc("user0")
+	if len(ps.procs) != 0 {
 		t.Fail()
 	}
 
 	// proc not found in map
-	m = make(procMap)
-	m["user0"] = &testServer{exit: make(chan int)}
-	m["user1"] = &testServer{exit: make(chan int)}
-	m = removeProcs(m, &testServer{exit: make(chan int)})
-	if len(m) != 2 {
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.procs["user0"] = &testServer{}
+	ps.procs["user1"] = &testServer{}
+	ps.removeProc("user2")
+	if len(ps.procs) != 2 {
 		t.Fail()
 	}
-	for _, p := range m {
+	for _, p := range ps.procs {
 		ts, ok := p.(*testServer)
 		if !ok {
 			t.Fatal()
@@ -131,116 +64,331 @@ func TestRemoveProcs(t *testing.T) {
 	}
 
 	// remove proc
-	m = make(procMap)
-	p0 := &testServer{exit: make(chan int)}
-	m["user0"] = p0
-	m["user1"] = &testServer{exit: make(chan int)}
-	m = removeProcs(m, p0)
-	if len(m) != 1 || m["user0"] == p0 || !p0.closed {
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	p0 := &testServer{}
+	ps.procs["user0"] = p0
+	ps.procs["user1"] = &testServer{}
+	ps.removeProc("user0")
+	if len(ps.procs) != 1 || ps.procs["user0"] == p0 || !p0.closed {
+		t.Fail()
+	}
+}
+
+func TestRemoveIdle(t *testing.T) {
+	// no procs
+	ps := new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	ps.removeIdle(time.Now())
+	if len(ps.procs) != 0 || len(ps.accessed) != 0 {
 		t.Fail()
 	}
 
-	// remove multiple
-	m = make(procMap)
-	p0 = &testServer{exit: make(chan int)}
-	p1 := &testServer{exit: make(chan int)}
-	p2 := &testServer{exit: make(chan int)}
-	m["user0"] = p0
-	m["user1"] = p1
-	m["user2"] = p2
-	p3 := &testServer{exit: make(chan int)}
-	m = removeProcs(m, p2, p3, p0)
-	if len(m) != 1 || m["user1"] != p1 ||
-		!p0.closed || p1.closed || !p2.closed || p3.closed {
+	// no idle procs
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	p0 := new(testServer)
+	ps.procs["user0"] = p0
+	ps.accessed["user0"] = time.Now().Add(-procIdleTimeout / 2)
+	ps.removeIdle(time.Now())
+	if len(ps.procs) != 1 || len(ps.accessed) != 1 || ps.procs["user0"] != p0 {
 		t.Fail()
 	}
+
+	// remove idle procs
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	p0 = new(testServer)
+	ps.procs["user0"] = p0
+	ps.accessed["user0"] = time.Now().Add(-2 * procIdleTimeout)
+	p1 := new(testServer)
+	ps.procs["user1"] = p1
+	ps.accessed["user1"] = time.Now().Add(-procIdleTimeout / 2)
+	p2 := new(testServer)
+	ps.procs["user2"] = p2
+	ps.accessed["user2"] = time.Now().Add(-2 * procIdleTimeout)
+	ps.removeIdle(time.Now())
+	if len(ps.procs) != 1 || len(ps.accessed) != 1 || ps.procs["user1"] != p1 {
+		t.Fail()
+	}
+}
+
+func TestGetCreateProc(t *testing.T) {
+	defer func(c string, a []string) { command, args = c, a }(command, args)
+	command, args = "testproc", []string{"wait", "4500"}
+
+	// get existing
+	ps := new(procStore)
+	now := time.Now()
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	p0 := new(testServer)
+	ps.procs["user0"] = p0
+	p0i, err := ps.getCreateProc("user0")
+	if p0i != p0 || err != nil ||
+		ps.accessed["user0"].Before(now) || ps.accessed["user0"].After(time.Now()) {
+		t.Fail()
+	}
+
+	// create new
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
+	ps.banned = make(map[string]time.Time)
+	ps.accessed = make(map[string]time.Time)
+	p0i, err = ps.getCreateProc("user0")
+	if err != nil || len(ps.procs) != 1 || ps.procs["user0"] == nil {
+		t.Fail()
+	}
+	p0i.close()
+	WithTimeout(t, eto, func() {
+		s := <-ps.px
+		if s.user != "user0" || s.proc != p0i {
+			t.Fail()
+		}
+	})
+
+	// banned
+	ps = new(procStore)
+	ps.banned = make(map[string]time.Time)
+	ps.banned["user0"] = time.Now().Add(-failureRecoveryTime / 2)
+	_, err = ps.getCreateProc("user0")
+	if err != temporarilyBanned {
+		t.Fail()
+	}
+
+	// banned, expired
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
+	ps.accessed = make(map[string]time.Time)
+	ps.banned = make(map[string]time.Time)
+	ps.banned["user0"] = time.Now().Add(-2 * failureRecoveryTime)
+	p0i, err = ps.getCreateProc("user0")
+	if err != nil || len(ps.banned) != 0 || len(ps.procs) == 0 || ps.procs["user0"] == p0 {
+		t.Fail()
+	}
+	p0i.close()
+	WithTimeout(t, eto, func() {
+		s := <-ps.px
+		if s.user != "user0" || s.proc != p0i {
+			t.Fail()
+		}
+	})
+
+	// has idle
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
+	ps.banned = make(map[string]time.Time)
+	ps.accessed = make(map[string]time.Time)
+	p0 = new(testServer)
+	ps.procs["user0"] = p0
+	ps.accessed["user0"] = time.Now().Add(-2 * procIdleTimeout)
+	p1 := new(testServer)
+	ps.procs["user1"] = p1
+	ps.accessed["user1"] = time.Now()
+	p2i, err := ps.getCreateProc("user2")
+	if err != nil || len(ps.procs) != 2 || ps.procs["user1"] != p1 || ps.procs["user2"] == nil {
+		t.Fail()
+	}
+	p2i.close()
+	WithTimeout(t, eto, func() {
+		s := <-ps.px
+		if s.user != "user2" || s.proc != p2i {
+			t.Fail()
+		}
+	})
+
+	// max procs exceede
+	ps = new(procStore)
+	ps.maxProcs = 1
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
+	ps.banned = make(map[string]time.Time)
+	ps.accessed = make(map[string]time.Time)
+	p0 = new(testServer)
+	ps.procs["user0"] = p0
+	ps.accessed["user0"] = time.Now()
+	p1i, err := ps.getCreateProc("user1")
+	if err != nil || len(ps.procs) != 1 || ps.procs["user1"] == nil {
+		t.Fail()
+	}
+	p1i.close()
+	WithTimeout(t, eto, func() {
+		s := <-ps.px
+		if s.user != "user1" || s.proc != p1i {
+			t.Fail()
+		}
+	})
+}
+
+func TestDiscardFailures(t *testing.T) {
+	// empty
+	f := discardFailures(nil, time.Now())
+	if len(f) != 0 {
+		t.Fail()
+	}
+
+	// nothing to discard
+	f = []time.Time{time.Now().Add(-failureRecoveryTime / 2), time.Now()}
+	f = discardFailures(f, time.Now())
+	if len(f) != 2 {
+		t.Fail()
+	}
+
+	// discard
+	f = []time.Time{time.Now().Add(-2 * failureRecoveryTime), time.Now()}
+	f = discardFailures(f, time.Now())
+	if len(f) != 1 {
+		t.Fail()
+	}
+}
+
+func TestProcErrors(t *testing.T) {
+	// no error
+	ps := new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	ps.procErrors("user0", nil, nil)
+	if len(ps.failures["user0"]) != 0 {
+		t.Fail()
+	}
+
+	// failure added
+	ps = new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	now := time.Now()
+	ps.procErrors("user0", []error{testError}, nil)
+	if len(ps.failures["user0"]) != 1 || ps.failures["user0"][0].Before(now) {
+		t.Fail()
+	}
+
+	// discard if old
+	ps = new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	ps.failures["user0"] = []time.Time{time.Now().Add(-2 * failureRecoveryTime)}
+	now = time.Now()
+	ps.procErrors("user0", []error{testError}, nil)
+	if len(ps.failures["user0"]) != 1 || ps.failures["user0"][0].Before(now) {
+		t.Fail()
+	}
+
+	// max exceeded
+	ps = new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	ps.banned = make(map[string]time.Time)
+	now = time.Now()
+	for i := 0; i < maxSocketFailures; i++ { ps.failures["user0"] = append(ps.failures["user0"], now) }
+	ps.procErrors("user0", []error{testError}, nil)
+	if len(ps.failures["user0"]) != 0 || ps.banned["user0"].Before(now) {
+		t.Fail()
+	}
+	
+	// notify
+	ps = new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	notify := make(chan error)
+	WithTimeout(t, eto, func() {
+		go func() { ps.procErrors("user0", []error{testError}, notify) }()
+		err := <-notify
+		if perr, ok := err.(*ProcError); !ok ||
+			perr.User != "user0" || perr.Err != testError {
+			t.Fail()
+		}
+	})
 }
 
 func TestCloseAll(t *testing.T) {
 	if !testLong {
 		t.Skip()
 	}
+
 	// nothing to close
 	ps := new(procStore)
-	m := make(procMap)
-	err := ps.closeAll(m, nil)
-	if err != nil {
-		t.Fail()
-	}
+	ps.procs = make(map[string]runner)
+	WithTimeout(t, eto, func() {
+		err := ps.closeAll(nil)
+		if err != nil {
+			t.Fail()
+		}
+	})
 
 	// close all
 	ps = new(procStore)
-	ps.procExit = make(chan exitStatus)
-	m = make(procMap)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
 	p0 := &testServer{exit: make(chan int)}
-	m["user0"] = p0
-	go ps.runProc(p0)
+	ps.procs["user0"] = p0
 	p1 := &testServer{exit: make(chan int)}
-	m["user1"] = p1
-	go ps.runProc(p1)
+	ps.procs["user1"] = p1
 	WithTimeout(t, eto, func() {
-		err = ps.closeAll(m, nil)
-		if err != nil || !p0.closed || !p1.closed ||
-			!p0.closed || !p1.closed {
+		go func() { ps.px <- exitStatus{proc: p0, status: p0.run()} }()
+		go func() { ps.px <- exitStatus{proc: p1, status: p1.run()} }()
+		err := ps.closeAll(nil)
+		if err != nil || !p0.closed || !p1.closed {
 			t.Fail()
 		}
 	})
 
 	// cleanup failed
 	ps = new(procStore)
-	ps.procExit = make(chan exitStatus)
-	m = make(procMap)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
 	p0 = &testServer{exit: make(chan int)}
-	m["user0"] = p0
-	go ps.runProc(p0)
+	ps.procs["user0"] = p0
 	p1 = &testServer{exit: make(chan int)}
-	m["user1"] = p1
 	p1.cleanupFail = true
-	go ps.runProc(p1)
+	ps.procs["user1"] = p1
 	WithTimeout(t, eto, func() {
-		err = ps.closeAll(m, nil)
-		if err != procCleanupFailed {
+		go func() { ps.px <- exitStatus{proc: p0, status: p0.run()} }()
+		go func() { ps.px <- exitStatus{proc: p1, status: p1.run()} }()
+		err := ps.closeAll(nil)
+		if err != procCleanupFailed || !p0.closed || !p1.closed {
 			t.Fail()
 		}
 	})
 
 	// timeout
 	ps = new(procStore)
-	ps.procExit = make(chan exitStatus)
-	m = make(procMap)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
 	p0 = &testServer{exit: make(chan int)}
-	m["user0"] = p0
-	go ps.runProc(p0)
+	ps.procs["user0"] = p0
 	p1 = &testServer{exit: make(chan int)}
-	m["user1"] = p1
+	p1.cleanupFail = true
+	ps.procs["user1"] = p1
 	WithTimeout(t, 2 * procStoreCloseTimeout, func() {
-		err = ps.closeAll(m, nil)
-		if err != procStoreCloseTimeouted {
+		go func() { ps.px <- exitStatus{proc: p0, status: p0.run()} }()
+		err := ps.closeAll(nil)
+		if err != procStoreCloseTimeouted || !p0.closed || !p1.closed {
 			t.Fail()
 		}
 	})
 
 	// proc error
 	ps = new(procStore)
-	ps.procExit = make(chan exitStatus)
-	m = make(procMap)
+	ps.procs = make(map[string]runner)
+	ps.px = make(chan exitStatus)
 	p0 = &testServer{exit: make(chan int)}
-	m["user0"] = p0
-	go ps.runProc(p0)
+	ps.procs["user0"] = p0
 	p1 = &testServer{exit: make(chan int)}
-	m["user1"] = p1
-	go ps.runProc(p1)
-	WithTimeout(t, 2 * procStoreCloseTimeout, func() {
+	ps.procs["user1"] = p1
+	WithTimeout(t, eto, func() {
+		go func() { ps.px <- exitStatus{proc: p0, status: p0.run()} }()
+		go func() { ps.px <- exitStatus{proc: p1, status: p1.run()} }()
 		procErrors := make(chan error)
-		go func() {
-			err = ps.closeAll(m, procErrors)
+		w := Wait(func() {
+			err := ps.closeAll(procErrors)
 			if err != nil || !p0.closed || !p1.closed {
 				t.Fail()
 			}
-		}()
+		})
 		errs := make(map[string]bool)
 		for {
-			err = <-procErrors
+			err := <-procErrors
 			perr, ok := err.(*ProcError)
 			if !ok {
 				t.Fail()
@@ -253,33 +401,40 @@ func TestCloseAll(t *testing.T) {
 				break
 			}
 		}
+		<-w
 	})
 }
 
-func TestFindUser(t *testing.T) {
-	// empty map
-	m := make(procMap)
-	u := findUser(m, new(testServer))
-	if u != "" {
+func TestCleanupFailures(t *testing.T) {
+	// nothing to cleanup
+	ps := new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	ps.banned = make(map[string]time.Time)
+	ps.cleanupFailures(time.Now())
+	if len(ps.failures) != 0 || len(ps.banned) != 0 {
 		t.Fail()
 	}
 
-	// not found
-	m = make(procMap)
-	m["user0"] = new(testServer)
-	m["user1"] = new(testServer)
-	u = findUser(m, new(testServer))
-	if u != "" {
+	// nothing to recover
+	ps = new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	ps.banned = make(map[string]time.Time)
+	ps.failures["user0"] = []time.Time{time.Now()}
+	ps.banned["user1"] = time.Now()
+	ps.cleanupFailures(time.Now())
+	if len(ps.failures["user0"]) != 1 || len(ps.banned) != 1 {
 		t.Fail()
 	}
 
-	// found
-	m = make(procMap)
-	p0 := new(testServer)
-	m["user0"] = p0
-	m["user1"] = new(testServer)
-	u = findUser(m, p0)
-	if u != "user0" {
+	// cleanup
+	ps = new(procStore)
+	ps.failures = make(map[string][]time.Time)
+	ps.banned = make(map[string]time.Time)
+	ps.failures["user0"] = []time.Time{time.Now().Add(-2 * failureRecoveryTime), time.Now()}
+	ps.banned["user1"] = time.Now().Add(-2 * failureRecoveryTime)
+	ps.banned["user2"] = time.Now().Add(-failureRecoveryTime / 2)
+	ps.cleanupFailures(time.Now())
+	if len(ps.failures["user0"]) != 1 || len(ps.banned) != 1 {
 		t.Fail()
 	}
 }
@@ -288,6 +443,9 @@ func TestProcStoreRun(t *testing.T) {
 	if (!testLong) {
 		t.Skip()
 	}
+
+	defer func(c string, a []string) { command, args = c, a }(command, args)
+	command, args = "testproc", []string{"wait", "4500"}
 
 	// run, exit
 	ps := new(procStore)
@@ -298,324 +456,158 @@ func TestProcStoreRun(t *testing.T) {
 		t.Fail()
 	}
 
-	// run, get empty map, exit
-	ps = new(procStore)
-	ps.exit = make(chan int)
-	ps.m = make(chan procMap)
-	WithTimeout(t, eto, func() {
-		go func() {
-			err := ps.run(nil)
-			if err != nil {
-				t.Fail()
-			}
-		}()
-		m := <-ps.m
-		if len(m) != 0 {
-			t.Fail()
-		}
-		close(ps.exit)
-	})
-
 	// run, add proc, get proc, exit
 	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
 	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
+	ps.px = make(chan exitStatus)
+	ps.gc = make(chan getCreateProc)
 	WithTimeout(t, eto, func() {
-		p0 := new(testServer)
-		go func() {
+		var p0 runner
+		w := Wait(func() {
 			err := ps.run(nil)
 			if err != nil {
 				t.Fail()
 			}
-			if !p0.closed {
-				t.Fail()
-			}
-		}()
-		p0.waitForClose = true
-		ps.ad <- addProc{user: "user0", proc: p0}
-		m := <-ps.m
-		if len(m) != 1 || m["user0"] == nil {
+			<-p0.(*proc).exit
+		})
+		rc := make(chan getCreateResult)
+		ps.gc <- getCreateProc{user: "user0", res: rc}
+		res := <-rc
+		if res.proc == nil || res.err != nil {
 			t.Fail()
 		}
+		if len(ps.procs) != 1 || ps.procs["user0"] == nil {
+			t.Fail()
+		}
+		p0 = res.proc
 		close(ps.exit)
-	})
-
-	// run, add proc, get proc, remove proc, exit
-	ps = new(procStore)
-	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
-	ps.rm = make(chan runner)
-	WithTimeout(t, 240 * time.Millisecond + exitTimeout, func() {
-		p0 := new(testServer)
-		p0.waitForClose = true
-		go func() {
-			err := ps.run(nil)
-			if err != nil {
-				t.Fail()
-			}
-			if !p0.closed {
-				t.Fail()
-			}
-		}()
-		ps.ad <- addProc{user: "user0", proc: p0}
-		time.Sleep(120 * time.Millisecond)
-		m := <-ps.m
-		if m["user0"] != p0 {
-			t.Fail()
-		}
-		ps.rm <- p0
-		time.Sleep(120 * time.Millisecond)
-		m = <-ps.m
-		if len(m) != 0 {
-			t.Fail()
-		}
-		close(ps.exit)
+		<-w
 	})
 
 	// run, add proc, let proc exit, exit
+	args = []string{"wait", "240"}
 	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	ps.failures = make(map[string][]time.Time)
 	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
+	ps.px = make(chan exitStatus)
+	ps.gc = make(chan getCreateProc)
 	WithTimeout(t, exitTimeout, func() {
-		p0 := new(testServer)
-		p0.exit = make(chan int)
-		go func() {
+		w := Wait(func() {
 			err := ps.run(nil)
 			if err != nil {
 				t.Fail()
 			}
-			if !p0.closed {
-				t.Fail()
-			}
-		}()
-		ps.ad <- addProc{user: "user0", proc: p0}
+		})
+		rc := make(chan getCreateResult)
+		ps.gc <- getCreateProc{user: "user0", res: rc}
+		res := <-rc
+		<-res.proc.(*proc).exit
 		time.Sleep(120 * time.Millisecond)
-		m := <-ps.m
-		if len(m) != 0 || !p0.closed {
+		if len(ps.procs) > 0 {
 			t.Fail()
 		}
 		close(ps.exit)
+		<-w
 	})
 
 	// run, add proc, let proc exit, collect errors
+	args = []string{"wait", "240"}
 	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	ps.failures = make(map[string][]time.Time)
 	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
+	ps.px = make(chan exitStatus)
+	ps.gc = make(chan getCreateProc)
 	WithTimeout(t, exitTimeout, func() {
-		procErrors := make(chan error)
-		go func() {
-			err := ps.run(procErrors)
+		pe := make(chan error)
+		w := Wait(func() {
+			err := ps.run(pe)
 			if err != nil {
 				t.Fail()
 			}
-		}()
-		p0 := new(testServer)
-		p0.exit = make(chan int)
-		ps.ad <- addProc{user: "user0", proc: p0}
+		})
+		rc := make(chan getCreateResult)
+		ps.gc <- getCreateProc{user: "user0", res: rc}
+		res := <-rc
+		<-res.proc.(*proc).exit
 		time.Sleep(120 * time.Millisecond)
-		err := <-procErrors
+		if len(ps.procs) > 0 {
+			t.Fail()
+		}
+		err := <-pe
 		if err == nil {
 			t.Fail()
 		}
-		if perr, ok := err.(*ProcError); !ok || perr.User != "user0" || perr.Err != testError {
+		if perr, ok := err.(*ProcError); !ok || perr.User != "user0" || perr.Err != unexpectedExit {
 			t.Fail()
 		}
 		close(ps.exit)
+		<-w
 	})
 
 	// idle check
-	ps = new(procStore)
-	ps.exit = make(chan int)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
+	args = []string{"wait", "12000"}
 	defer func(period, timeout time.Duration) {
 		procIdleCheckPeriod = period
 		procIdleTimeout = timeout
 	}(procIdleCheckPeriod, procIdleTimeout)
+	ps = new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
+	ps.failures = make(map[string][]time.Time)
+	ps.exit = make(chan int)
+	ps.px = make(chan exitStatus)
+	ps.gc = make(chan getCreateProc)
 	procIdleCheckPeriod = 15 * time.Millisecond
 	procIdleTimeout = 30 * time.Millisecond
 	WithTimeout(t, exitTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			err := ps.run(nil)
 			if err != nil {
 				t.Fail()
 			}
-		}()
-		now := time.Now()
-		p0 := new(testServer)
-		p0.access = now.Add(-2 * procIdleCheckPeriod)
-		p0.exit = make(chan int)
-		ps.ad <- addProc{user: "user0", proc: p0}
-		p1 := new(testServer)
-		p1.access = now.Add(-2 * procIdleCheckPeriod)
-		p1.exit = make(chan int)
-		ps.ad <- addProc{user: "user1", proc: p1}
-		p2 := new(testServer)
-		p2.access = now
-		p2.exit = make(chan int)
-		ps.ad <- addProc{user: "user2", proc: p2}
-		p3 := new(testServer)
-		p3.access = now.Add(6 * procIdleCheckPeriod)
-		p3.exit = make(chan int)
-		ps.ad <- addProc{user: "user3", proc: p3}
-		time.Sleep(15 * time.Millisecond)
-		m := <-ps.m
-		if len(m) != 2 || m["user2"] != p2 || m["user3"] != p3 {
-			t.Fail()
-		}
-		time.Sleep(30 * time.Millisecond)
-		m = <-ps.m
-		if len(m) != 1 || m["user3"] != p3 {
-			t.Fail()
-		}
+		})
+		rc := make(chan getCreateResult)
+		ps.gc <- getCreateProc{user: "user0", res: rc}
+		res := <-rc
+		<-res.proc.(*proc).exit
 		close(ps.exit)
+		<-w
 	})
 }
 
-func TestGetMap(t *testing.T) {
-	ps := new(procStore)
-	ps.exit = make(chan int)
-	ps.m = make(chan procMap)
-	WithTimeout(t, eto, func() {
-		go func() {
-			err := ps.run(nil)
-			if err != nil {
-				t.Fail()
-			}
-		}()
-		m, err := ps.getMap()
-		if m == nil || err != nil {
-			t.Fail()
-		}
-		close(ps.exit)
-		m, err = ps.getMap()
-		if err != procStoreClosed {
-			t.Fail()
-		}
-	})
-}
+func TestGetCreate(t *testing.T) {
+	defer func(c string, a []string) { command, args = c, a }(command, args)
+	command, args = "testproc", []string{"wait", "4500"}
 
-func TestCreate(t *testing.T) {
-	commandOrig := command
-	argsOrig := args
-	defer func() {
-		command = commandOrig
-		args = argsOrig
-	}()
-	command = "testproc"
-	args = []string{"wait", "12000"}
 	ps := new(procStore)
+	ps.procs = make(map[string]runner)
+	ps.accessed = make(map[string]time.Time)
 	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
+	ps.px = make(chan exitStatus)
+	ps.gc = make(chan getCreateProc)
 	WithTimeout(t, exitTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			err := ps.run(nil)
 			if err != nil {
 				t.Fail()
 			}
-		}()
-		time.Sleep(120 * time.Millisecond)
-		err := ps.create("user0")
-		if err != nil {
-			t.Fail()
-		}
-		time.Sleep(120 * time.Millisecond)
-		m := <-ps.m
-		if len(m) != 1 || m["user0"] == nil {
-			t.Fail()
-		}
-		close(ps.exit)
-		err = ps.create("user1")
-		if err != procStoreClosed {
-			t.Fail()
-		}
-	})
-}
-
-func TestGet(t *testing.T) {
-	commandOrig := command
-	argsOrig := args
-	defer func() {
-		command = commandOrig
-		args = argsOrig
-	}()
-	command = "testproc"
-	args = []string{"wait", "12000"}
-	ps := new(procStore)
-	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
-	WithTimeout(t, exitTimeout, func() {
-		go func() {
-			err := ps.run(nil)
-			if err != nil {
-				t.Fail()
-			}
-		}()
-		p, err := ps.get("user0")
+		})
+		p, err := ps.getCreate("user0")
 		if p == nil || err != nil {
 			t.Fail()
 		}
 		close(ps.exit)
 		time.Sleep(120 * time.Millisecond)
-		_, err = ps.get("user0")
-		if err != procStoreClosed {
+		p, err = ps.getCreate("user0")
+		if p != nil || err != procStoreClosed {
 			t.Fail()
 		}
-	})
-}
-
-func TestRemove(t *testing.T) {
-	commandOrig := command
-	argsOrig := args
-	defer func() {
-		command = commandOrig
-		args = argsOrig
-	}()
-	command = "testproc"
-	args = []string{"wait", "12000"}
-	ps := new(procStore)
-	ps.exit = make(chan int)
-	ps.procExit = make(chan exitStatus)
-	ps.m = make(chan procMap)
-	ps.ad = make(chan addProc)
-	ps.rm = make(chan runner)
-	WithTimeout(t, exitTimeout, func() {
-		go func() {
-			err := ps.run(nil)
-			if err != nil {
-				t.Fail()
-			}
-		}()
-		p, err := ps.get("user0")
-		if p == nil || err != nil {
-			t.Fail()
-		}
-		err = ps.remove(p)
-		if err != nil {
-			t.Fail()
-		}
-		time.Sleep(120 * time.Millisecond)
-		pi, err := ps.get("user0")
-		if pi == nil || pi == p || err != nil {
-			t.Fail()
-		}
-		close(ps.exit)
-		time.Sleep(120 * time.Millisecond)
-		err = ps.remove(pi)
-		if err != procStoreClosed {
-			t.Fail()
-		}
+		<-w
 	})
 }

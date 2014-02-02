@@ -3,7 +3,6 @@ package htproc
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 	// "syscall"
@@ -11,6 +10,7 @@ import (
 	"time"
 	. "code.google.com/p/tasked/testing"
 	"net/http"
+	"fmt"
 )
 
 type testReader struct {
@@ -85,7 +85,9 @@ func (w *testWriter) Write(p []byte) (int, error) {
 func (s *testServer) accessed() time.Time { return s.access }
 
 func (s *testServer) close() {
-	close(s.exit)
+	if s.exit != nil {
+		close(s.exit)
+	}
 	s.closed = true
 }
 
@@ -134,17 +136,14 @@ func TestNewProc(t *testing.T) {
 	address := "address"
 	to := time.Duration(42)
 	p := newProc(address, to)
-	if p.cmd == nil || p.socket == nil {
+	if p.cmd == nil || p.proxy == nil {
 		t.Fail()
 	}
-	socket, ok := p.socket.(*socket)
-	if !ok || socket.address != address || socket.timeout != to {
+	proxy, ok := p.proxy.(*proxy)
+	if !ok || proxy.address != address || proxy.timeout != to {
 		t.Fail()
 	}
-	if p.ready == nil ||
-		p.access == nil ||
-		p.laccess == nil ||
-		p.exit == nil {
+	if p.failure == nil || p.ready == nil || p.exit == nil {
 		t.Fail()
 	}
 }
@@ -387,15 +386,10 @@ func TestFilterLines(t *testing.T) {
 }
 
 func TestStartError(t *testing.T) {
-	p := &proc{
-		ready: make(chan int),
-		laccess: make(chan time.Time)}
+	p := &proc{ready: make(chan int)}
 	e := errors.New("testerror")
 	s := p.startError(e)
-	WithTimeout(t, eto, func() {
-		<-p.ready
-		<-p.laccess
-	})
+	WithTimeout(t, eto, func() { <-p.ready })
 	if len(s.errors) != 1 || s.errors[0] != e {
 		t.Fail()
 	}
@@ -453,7 +447,7 @@ func TestWaitOutput(t *testing.T) {
 	})
 }
 
-func TestWaitExit(t *testing.T) {
+func TestSignalWait(t *testing.T) {
 	if !testLong {
 		t.Skip()
 	}
@@ -471,7 +465,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	ErrFatal(t, p.cmd.Start())
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(false)
+		s := p.signalWait(false)
 		if s.cleanupFailed || len(s.errors) > 0 {
 			t.Fail()
 		}
@@ -486,7 +480,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	ErrFatal(t, p.cmd.Start())
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if s.cleanupFailed || len(s.errors) > 0 {
 			t.Fail()
 		}
@@ -497,7 +491,7 @@ func TestWaitExit(t *testing.T) {
 	p.cmd = exec.Command("testproc", "noop")
 	ErrFatal(t, p.cmd.Run())
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if !s.cleanupFailed || len(s.errors) == 0 {
 			t.Fail()
 		}
@@ -512,7 +506,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if s.cleanupFailed || len(s.errors) != 0 {
 			t.Fail()
 		}
@@ -527,7 +521,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if !s.cleanupFailed || len(s.errors) != 1 {
 			t.Fail()
 		}
@@ -542,7 +536,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, 2 * exitTimeout, func() {
-		s := p.waitExit(false)
+		s := p.signalWait(false)
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != killSignaled {
 			t.Fail()
 		}
@@ -558,7 +552,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, 2 * exitTimeout, func() {
 		time.Sleep(120 * time.Millisecond)
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != killSignaled {
 			t.Fail()
 		}
@@ -573,7 +567,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stdout <- lineRead{err: testError} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if s.cleanupFailed {
 			t.Fail()
 		}
@@ -591,7 +585,7 @@ func TestWaitExit(t *testing.T) {
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: testError} }()
 	WithTimeout(t, eto, func() {
-		s := p.waitExit(true)
+		s := p.signalWait(true)
 		if s.cleanupFailed {
 			t.Fail()
 		}
@@ -601,43 +595,76 @@ func TestWaitExit(t *testing.T) {
 	})
 }
 
-func TestOutputError(t *testing.T) {
-	// eof
+func TestWaitExit(t *testing.T) {
+	// nothing
 	p := new(proc)
 	p.cmd = exec.Command("testproc", "noop")
-	p.laccess = make(chan time.Time)
 	p.ready = make(chan int)
-	p.cmd.Start()
+	ErrFatal(t, p.cmd.Start())
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, eto, func() {
-		s := p.outputError(io.EOF)
-		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != unexpectedExit {
+		s := p.waitExit(true, false)
+		if len(s.errors) != 0 {
 			t.Fail()
 		}
-		<-p.laccess
-		<-p.ready
+		close(p.ready)
 	})
 
-	// error
+	// append error
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "noop")
-	p.laccess = make(chan time.Time)
 	p.ready = make(chan int)
-	p.cmd.Start()
+	ErrFatal(t, p.cmd.Start())
 	p.stdout = make(chan lineRead)
 	p.stderr = make(chan lineRead)
 	go func() { p.stdout <- lineRead{err: io.EOF} }()
 	go func() { p.stderr <- lineRead{err: io.EOF} }()
 	WithTimeout(t, eto, func() {
-		s := p.outputError(testError)
-		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != testError {
+		s := p.waitExit(true, false, testError)
+		if len(s.errors) != 1 || s.errors[0] != testError {
 			t.Fail()
 		}
-		<-p.laccess
-		<-p.ready
+		close(p.ready)
+	})
+
+	// started
+	p = new(proc)
+	p.cmd = exec.Command("testproc", "noop")
+	p.ready = make(chan int)
+	ErrFatal(t, p.cmd.Start())
+	p.stdout = make(chan lineRead)
+	p.stderr = make(chan lineRead)
+	go func() { p.stdout <- lineRead{err: io.EOF} }()
+	go func() { p.stderr <- lineRead{err: io.EOF} }()
+	WithTimeout(t, eto, func() {
+		s := p.waitExit(false, false)
+		if len(s.errors) != 0 {
+			t.Fail()
+		}
+		_, open := <-p.ready
+		if open {
+			t.Fail()
+		}
+	})
+}
+
+func TestOutputError(t *testing.T) {
+	// eof replaced
+	p := new(proc)
+	p.cmd = exec.Command("testproc", "noop")
+	ErrFatal(t, p.cmd.Start())
+	p.stdout = make(chan lineRead)
+	p.stderr = make(chan lineRead)
+	go func() { p.stdout <- lineRead{err: io.EOF} }()
+	go func() { p.stderr <- lineRead{err: io.EOF} }()
+	WithTimeout(t, eto, func() {
+		s := p.outputError(true, io.EOF)
+		if len(s.errors) != 1 || s.errors[0] != unexpectedExit {
+			t.Fail()
+		}
 	})
 }
 
@@ -649,7 +676,6 @@ func TestProcRun(t *testing.T) {
 	// start fail
 	p := new(proc)
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
 	p.cmd = exec.Command("")
 	s := p.run()
 	if s.cleanupFailed || len(s.errors) != 1 {
@@ -660,7 +686,6 @@ func TestProcRun(t *testing.T) {
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs*2))
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
 	WithTimeout(t, 2 * startupTimeout, func() {
 		s = p.run()
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != startupTimeouted {
@@ -672,7 +697,6 @@ func TestProcRun(t *testing.T) {
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", fmt.Sprint(startupTimeoutMs/2))
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
 	WithTimeout(t, 2 * startupTimeout, func() {
 		s = p.run()
 		if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != unexpectedExit {
@@ -684,82 +708,68 @@ func TestProcRun(t *testing.T) {
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "printwait", "4500", "some message", string(startupMessage), "")
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
 	WithTimeout(t, startupTimeout + exitTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			s = p.run()
 			if s.cleanupFailed || len(s.errors) != 0 {
 				t.Fail()
 			}
-		}()
+		})
 		<-p.ready
 		p.close()
-		<-p.laccess
+		<-w
 	})
 
 	// start message twice
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "printwait", "4500", string(startupMessage), string(startupMessage))
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
 	WithTimeout(t, startupTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			s = p.run()
 			if s.cleanupFailed || len(s.errors) != 0 {
 				t.Fail()
 			}
-		}()
+		})
 		<-p.ready
 		p.close()
-		<-p.laccess
+		<-w
 	})
 
 	// close before started
 	p = new(proc)
 	p.cmd = exec.Command("testproc", "wait", "4500")
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
 	p.exit = make(chan int)
 	WithTimeout(t, startupTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			s = p.run()
 			if s.cleanupFailed || len(s.errors) != 0 {
 				t.Fail()
 			}
-		}()
+		})
 		p.close()
 		<-p.ready
-		<-p.laccess
+		<-w
 	})
 
-	// update access time
+	// failure
 	p = new(proc)
-	p.cmd = exec.Command("testproc", "printwait", "4500", string(startupMessage))
+	p.cmd = exec.Command("testproc", "wait", "4500")
 	p.ready = make(chan int)
-	p.laccess = make(chan time.Time)
-	p.access = make(chan time.Time)
-	p.exit = make(chan int)
+	p.failure = make(chan int)
 	WithTimeout(t, startupTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			s = p.run()
-			if s.cleanupFailed || len(s.errors) != 0 {
+			if s.cleanupFailed || len(s.errors) != 1 || s.errors[0] != socketFailure {
 				t.Fail()
 			}
-		}()
-		time.Sleep(120)
-		startTime := <-p.laccess
-		now := time.Now()
-		if !now.After(startTime) {
-			t.Fail()
-		}
-		p.access <- now
-		nowBack := <-p.laccess
-		if nowBack != now {
-			t.Fail()
-		}
-		p.close()
+		})
+		close(p.failure)
+		<-p.ready
+		<-w
 	})
 }
 
@@ -768,34 +778,37 @@ func TestServe(t *testing.T) {
 		t.Skip()
 	}
 
-	// access
+	// serve
 	p := new(proc)
 	p.ready = make(chan int)
-	p.access = make(chan time.Time)
-	p.socket = new(testServer)
+	p.failure = make(chan int)
+	p.proxy = new(testServer)
 	WithTimeout(t, startupTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			err := p.serve(nil, nil)
 			if err != testError {
 				t.Fail()
 			}
-		}()
+		})
 		close(p.ready)
-		<-p.access
+		<-p.failure
+		<-w
 	})
 
 	// exit
 	p = new(proc)
 	p.ready = make(chan int)
+	p.failure = make(chan int)
 	p.exit = make(chan int)
 	WithTimeout(t, startupTimeout, func() {
-		go func() {
+		w := Wait(func() {
 			err := p.serve(nil, nil)
 			if err != procClosed {
 				t.Fail()
 			}
-		}()
+		})
 		close(p.exit)
 		close(p.ready)
+		<-w
 	})
 }
