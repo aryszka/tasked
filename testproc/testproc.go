@@ -65,14 +65,16 @@ func printWait() {
 }
 
 func serve() {
-	if len(os.Args) <= 3 {
+	if len(os.Args) < 4 {
 		log.Fatalln(missingAddress)
 	}
 	addr := os.Args[2]
 	readyMsg := os.Args[3]
-	err := os.Remove(addr)
-	if err != nil && !os.IsNotExist(err) {
-		log.Fatalln(err)
+	if len(os.Args) <= 4 || os.Args[4] != "no-delete" {
+		err := os.Remove(addr)
+		if err != nil && !os.IsNotExist(err) {
+			log.Fatalln(err)
+		}
 	}
 	l, err := net.Listen("unixpacket", addr)
 	if err != nil {

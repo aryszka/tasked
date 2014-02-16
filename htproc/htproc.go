@@ -3,14 +3,12 @@ package htproc
 import (
 	. "code.google.com/p/tasked/share"
 	"net/http"
-	"time"
 )
 
 type Settings interface {
-	MaxProcesses() int
-	DialTimeout() time.Duration
-	IdleTimeout() time.Duration
-	Workdir() string
+	MaxUserProcesses() int
+	ProcessIdleTime() int
+	CacheDir() string
 }
 
 type ProcFilter struct {

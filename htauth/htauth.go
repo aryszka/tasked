@@ -41,7 +41,7 @@ type Auth interface {
 
 type Settings interface {
 	AllowCookies() bool
-	CookieMaxAge() int
+	TokenValidity() int // be it the tokenValidity
 }
 
 func newTokenString(s string) ([]byte, error) {

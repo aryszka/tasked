@@ -1704,9 +1704,9 @@ func TestGetDirRoot(t *testing.T) {
 
 func TestGetFile(t *testing.T) {
 	var (
-		f  *os.File
-		fi os.FileInfo
-		err error
+		f    *os.File
+		fi   os.FileInfo
+		err  error
 		html = []byte("<html></html>")
 	)
 	ht := newHandler(t, &testSettings{root: dn}).(*handler)
@@ -2167,11 +2167,11 @@ func TestCopyf(t *testing.T) {
 
 func TestRenamef(t *testing.T) {
 	var (
-		qry url.Values
+		qry  url.Values
 		dir0 string
 		dir1 string
-		fn0 string
-		fn1 string
+		fn0  string
+		fn1  string
 	)
 	dir := path.Join(dn, "rename")
 	tst.EnsureDirF(t, dir)

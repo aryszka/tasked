@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/tls"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
 )
@@ -21,36 +20,42 @@ func readKey(fn string) ([]byte, error) {
 	return key, err
 }
 
+func selfCert() {
+}
+
 func getTcpSettings(s *settings) ([]byte, []byte, string, error) {
-	var (
-		tlsKey, tlsCert []byte
-		address         string
-		err             error
-	)
-	if s != nil {
-		tlsKey, err = readKey(s.http.tls.keyFile)
-		if err != nil {
-			return nil, nil, "", err
+	/*
+		var (
+			tlsKey, tlsCert []byte
+			address         string
+			err             error
+		)
+		if s != nil {
+			tlsKey, err = s.TlsKey()
+			if err != nil {
+				return nil, nil, "", err
+			}
+			tlsCert, err = s.TlsCert()
+			if err != nil {
+				return nil, nil, "", err
+			}
+			address = s.Address()
 		}
-		tlsCert, err = readKey(s.http.tls.certFile)
-		if err != nil {
-			return nil, nil, "", err
+		if len(tlsKey) == 0 || len(tlsCert) == 0 {
+			log.Println(noTlsWarning)
 		}
-		address = s.http.address
-	}
-	if len(tlsKey) == 0 || len(tlsCert) == 0 {
-		log.Println(noTlsWarning)
-	}
-	if len(tlsKey) == 0 {
-		tlsKey = []byte(defaultTlsKey)
-	}
-	if len(tlsCert) == 0 {
-		tlsCert = []byte(defaultTlsCert)
-	}
-	if address == "" {
-		address = defaultAddress
-	}
-	return tlsKey, tlsCert, address, nil
+		if len(tlsKey) == 0 {
+			tlsKey = []byte(defaultTlsKey)
+		}
+		if len(tlsCert) == 0 {
+			tlsCert = []byte(defaultTlsCert)
+		}
+		if address == "" {
+			address = defaultAddress
+		}
+		return tlsKey, tlsCert, address, nil
+	*/
+	return nil, nil, "", nil
 }
 
 func listenTcp(s *settings) (net.Listener, error) {
@@ -73,5 +78,17 @@ func listenTcp(s *settings) (net.Listener, error) {
 }
 
 func listenUnix(s *settings) (net.Listener, error) {
-	return nil, nil
+	var (
+		l   net.Listener
+		err error
+	)
+	addr := s.Address()
+	if err = os.Remove(addr); err != nil && !os.IsNotExist(err) {
+		return l, err
+	}
+	return net.Listen("unixpacket", addr)
 }
+
+// shall it be able to listen on multiple channels?
+// no: use multiple processes. check if it is possible to differentiate between unix and tcp address, and if
+// yes, then use only one address flag.

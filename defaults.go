@@ -37,5 +37,4 @@ GWX4rnIZtcLahM1eu8h+QxdcTNGwCpIiait2pmpVcV6pjNKv8LUxAcaemq178OfK
 h3I2CsHAUTwxT1ca8SGLCsFTm03AyXaU0Q061+RX1Do/Iw==
 -----END CERTIFICATE-----
 `
-	defaultAddress = ":9090"
 )

@@ -13,7 +13,7 @@ const (
 	procStoreCloseTimeout      = 6 * time.Second
 	defaultProcIdleCheckPeriod = time.Minute
 	defaultProcIdleTimeout     = 12 * time.Minute
-	defaultDialTimeout         = 1 * time.Second
+	dialTimeout                = 1 * time.Second
 )
 
 type ProcError struct {
@@ -78,13 +78,8 @@ func (pe *ProcError) Fatal() bool {
 
 func newProcStore(s Settings) *procStore {
 	ps := new(procStore)
-	ps.maxProcs = s.MaxProcesses()
-	if sdto := s.DialTimeout(); sdto > 0 {
-		ps.dialTimeout = sdto
-	} else {
-		ps.dialTimeout = defaultDialTimeout
-	}
-	ps.socketsDir = path.Join(s.Workdir(), "sockets")
+	ps.maxProcs = s.MaxUserProcesses()
+	ps.socketsDir = path.Join(s.CacheDir(), "sockets")
 	ps.procs = make(map[string]runner)
 	ps.accessed = make(map[string]time.Time)
 	ps.failures = make(map[string][]time.Time)

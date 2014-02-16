@@ -25,7 +25,7 @@ const (
 )
 
 var (
-	allCmds                   = []string{
+	allCmds = []string{
 		CmdProps,
 		CmdSearch,
 		CmdModprops,

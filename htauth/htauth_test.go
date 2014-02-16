@@ -7,9 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"testing"
-	"io/ioutil"
 )
 
 const autoUser = "auto user"

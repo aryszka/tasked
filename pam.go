@@ -4,20 +4,19 @@ import (
 	pam "code.google.com/p/gopam"
 	"code.google.com/p/tasked/auth"
 	"errors"
-	"io/ioutil"
 )
 
 var authFailed = errors.New("Authentication failed.")
 
 type authSettings struct {
 	s      *settings
-	aesKey []byte
-	aesIv  []byte
+	aesKey string
+	aesIv  string
 }
 
-func (as *authSettings) AesKey() []byte     { return as.aesKey }
-func (as *authSettings) AesIv() []byte      { return as.aesIv }
-func (as *authSettings) TokenValidity() int { return as.s.sec.tokenValidity }
+func (as *authSettings) AesKey() string     { return as.aesKey }
+func (as *authSettings) AesIv() string      { return as.aesIv }
+func (as *authSettings) TokenValidity() int { return as.s.TokenValidity() }
 
 func authPam(user, pwd string) error {
 	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
@@ -46,19 +45,8 @@ func newAuth(s *settings) (*auth.It, error) {
 	}
 	as := &authSettings{}
 	as.s = s
-	if len(s.sec.aes.keyFile) > 0 {
-		b, err := ioutil.ReadFile(s.sec.aes.keyFile)
-		if err != nil {
-			return nil, err
-		}
-		as.aesKey = b
-	}
-	if len(s.sec.aes.ivFile) > 0 {
-		b, err := ioutil.ReadFile(s.sec.aes.ivFile)
-		if err != nil {
-			return nil, err
-		}
-		as.aesIv = b
-	}
-	return auth.New(auth.PasswordCheckerFunc(authPam), as)
+	as.aesKey = s.AesKey()
+	as.aesIv = s.AesIv()
+	// return auth.New(auth.PasswordCheckerFunc(authPam), as)
+	return nil, nil
 }
