@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"code.google.com/p/tasked/keyval"
 	. "code.google.com/p/tasked/testing"
 	"flag"
@@ -10,7 +11,6 @@ import (
 	"path"
 	"strings"
 	"testing"
-	"bytes"
 )
 
 func testEntries(t *testing.T, es []*keyval.Entry, expected ...*keyval.Entry) {
@@ -29,7 +29,7 @@ func testEntries(t *testing.T, es []*keyval.Entry, expected ...*keyval.Entry) {
 
 func TestFieldOrFile(t *testing.T) {
 	b, err := fieldOrFile("hello", "")
-    if err != nil || !bytes.Equal(b, []byte("hello")) {
+	if err != nil || !bytes.Equal(b, []byte("hello")) {
 		t.Fail()
 	}
 
@@ -67,6 +67,7 @@ func TestParseFlags(t *testing.T) {
 	}(os.Args, flag.CommandLine, os.Stderr)
 
 	// none set
+	os.Args = []string{"cmd"}
 	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
 	e := parseFlags()
 	if len(e) != 0 {
@@ -174,7 +175,6 @@ func TestParseOptions(t *testing.T) {
 		o.root != "" ||
 		o.cachedir != "" ||
 		o.maxSearchResults != 0 ||
-
 		o.address != "" ||
 		o.tlsKey != "" ||
 		o.tlsCert != "" ||

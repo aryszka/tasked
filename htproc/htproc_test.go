@@ -21,16 +21,16 @@ func init() {
 }
 
 type testOptions struct {
-	maxProcesses  int
-	dialTimeout   time.Duration
-	idleTimeout   int
-	cachedir string
+	maxProcesses int
+	dialTimeout  time.Duration
+	idleTimeout  int
+	cachedir     string
 }
 
-func (o *testOptions) MaxUserProcesses() int          { return o.maxProcesses }
-func (o *testOptions) DialTimeout() time.Duration     { return o.dialTimeout }
-func (o *testOptions) ProcessIdleTime() int           { return o.idleTimeout }
-func (o *testOptions) Cachedir() string               { return o.cachedir }
+func (o *testOptions) MaxUserProcesses() int      { return o.maxProcesses }
+func (o *testOptions) DialTimeout() time.Duration { return o.dialTimeout }
+func (o *testOptions) ProcessIdleTime() int       { return o.idleTimeout }
+func (o *testOptions) Cachedir() string           { return o.cachedir }
 
 func TestNew(t *testing.T) {
 	p := New(&testOptions{})

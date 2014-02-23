@@ -25,6 +25,7 @@ func Doretlog(do func() error, delay time.Duration) {
 }
 
 func Doretlog42(do func() error) {
+	println("closing")
 	Doretlog(do, 42*time.Millisecond)
 }
 

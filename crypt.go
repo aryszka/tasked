@@ -1,23 +1,23 @@
 package main
 
 import (
-	"math/big"
-	"crypto/rsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
-	"time"
 	"encoding/pem"
 	"io/ioutil"
-	"path"
+	"math/big"
 	"net"
 	"os"
+	"path"
+	"time"
 )
 
 const (
-	bits = 2048
+	bits            = 2048
 	tlsValidityDays = 11499
-	keyFilename = "key.pem"
-	certFilename = "cert.pem"
+	keyFilename     = "key.pem"
+	certFilename    = "cert.pem"
 )
 
 func selfCert(host interface{}, cachedir string) ([]byte, []byte, error) {
@@ -29,11 +29,11 @@ func selfCert(host interface{}, cachedir string) ([]byte, []byte, error) {
 	notAfter := now.Add(tlsValidityDays * 24 * time.Hour)
 	t := x509.Certificate{
 		SerialNumber: big.NewInt(now.Unix()),
-		NotBefore: now,
-		NotAfter: notAfter,
-		IsCA: true,
-		KeyUsage: x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+		NotBefore:    now,
+		NotAfter:     notAfter,
+		IsCA:         true,
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	if dname, ok := host.(string); ok {
 		t.DNSNames = []string{dname}
 	} else if ip, ok := host.(net.IP); ok {

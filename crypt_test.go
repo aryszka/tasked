@@ -1,18 +1,22 @@
 package main
 
 import (
-	"testing"
+	. "code.google.com/p/tasked/testing"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
-	"time"
+	"io/ioutil"
 	"net"
 	"path"
-	"io/ioutil"
-	. "code.google.com/p/tasked/testing"
+	"testing"
+	"time"
 )
 
 func TestSelfCert(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	test := func(host interface{}, cachedir string) {
 		before := time.Now()
 		before = time.Unix(before.Unix(), 0)
@@ -50,9 +54,9 @@ func TestSelfCert(t *testing.T) {
 			if tc.NotAfter.Before(notAfter) || tc.NotAfter.After(notAfterCap) {
 				t.Fail()
 			}
-			if tc.KeyUsage & x509.KeyUsageKeyEncipherment == 0 ||
-				tc.KeyUsage & x509.KeyUsageDigitalSignature == 0 ||
-				tc.KeyUsage & x509.KeyUsageCertSign == 0 {
+			if tc.KeyUsage&x509.KeyUsageKeyEncipherment == 0 ||
+				tc.KeyUsage&x509.KeyUsageDigitalSignature == 0 ||
+				tc.KeyUsage&x509.KeyUsageCertSign == 0 {
 				t.Fail()
 			}
 			if len(tc.ExtKeyUsage) == 0 || tc.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth {

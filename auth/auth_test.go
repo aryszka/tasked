@@ -177,18 +177,18 @@ func TestNew(t *testing.T) {
 		t.Fail()
 	}
 
-	iv := make([]byte, 1.5 * aes.BlockSize)
+	iv := make([]byte, 1.5*aes.BlockSize)
 	_, err = rand.Read(iv)
 	ErrFatal(t, err)
 	a, err = New(pcf, &testConfig{
-		aesKey: []byte("012"),
-		aesIv: iv,
+		aesKey:        []byte("012"),
+		aesIv:         iv,
 		tokenValidity: 30})
 	if err != nil || a == nil ||
 		len(a.key) != aes.BlockSize ||
 		len(a.iv) != aes.BlockSize ||
-		a.tokenValidity != 30 * time.Second ||
-		a.renewThreshold != time.Duration(float64(a.tokenValidity) * renewThresholdRate) {
+		a.tokenValidity != 30*time.Second ||
+		a.renewThreshold != time.Duration(float64(a.tokenValidity)*renewThresholdRate) {
 		t.Fail()
 	}
 }

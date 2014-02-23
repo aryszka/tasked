@@ -3,8 +3,8 @@ package htproc
 import (
 	"errors"
 	"fmt"
-	"time"
 	"path"
+	"time"
 )
 
 const (
@@ -44,9 +44,9 @@ type runner interface {
 }
 
 type procStore struct {
-	maxProcs int
+	maxProcs    int
 	dialTimeout time.Duration
-	socketsDir string
+	socketsDir  string
 
 	// todo: make struct for the proc related fields
 	procs    map[string]runner

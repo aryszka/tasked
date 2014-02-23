@@ -1,15 +1,15 @@
 package main
 
 import (
+	. "code.google.com/p/tasked/share"
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"net"
 	"os"
-	"regexp"
-	"errors"
-	"strconv"
 	"path"
-	. "code.google.com/p/tasked/share"
-	"fmt"
+	"regexp"
+	"strconv"
 )
 
 const noTlsWarning = "TLS has not been configured."
@@ -18,11 +18,11 @@ type schema string
 type port uint16
 
 const (
-	http schema = "http"
-	https schema = "https"
-	unix schema = "unix"
-	defaultPort port = 9090
-	defaultUnixAddressFmt = "nlet-%d"
+	http                  schema = "http"
+	https                 schema = "https"
+	unix                  schema = "unix"
+	defaultPort           port   = 9090
+	defaultUnixAddressFmt        = "nlet-%d"
 )
 
 type listenerOptions interface {
@@ -34,14 +34,14 @@ type listenerOptions interface {
 
 type address struct {
 	schema schema
-	val string
-	port port
+	val    string
+	port   port
 }
 
 var (
 	addressRx = regexp.MustCompile(
 		"^((((https?)|(unix)):)?((/{0,2}(([^:]*)|(\\[.*\\])))(:(\\d+))?)$)|" +
-		"(unix:(.*)$)")
+			"(unix:(.*)$)")
 	invalidAddress = errors.New("Invalid address.")
 )
 
@@ -74,7 +74,7 @@ func parseAddress(s string) (*address, error) {
 				return nil, err
 			}
 			a.port = port(p)
-		} 
+		}
 		return a, nil
 	}
 }
@@ -107,11 +107,12 @@ func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, err
 		return nil, err
 	}
 	if len(tlsKey) == 0 && len(tlsCert) == 0 {
+		println("why 0")
 		var host interface{}
 		if len(a.val) > 0 {
 			ip := net.ParseIP(a.val)
-			if ip == nil && a.val[0] == '[' && a.val[len(a.val) - 1] == ']' {
-				ip = net.ParseIP(a.val[1:len(a.val)-1])
+			if ip == nil && a.val[0] == '[' && a.val[len(a.val)-1] == ']' {
+				ip = net.ParseIP(a.val[1 : len(a.val)-1])
 			}
 			if ip == nil {
 				host = a.val
@@ -121,7 +122,7 @@ func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, err
 		}
 		cachedir := o.Cachedir()
 		if cachedir != "" {
-			cachedir = path.Join(cachedir, "p" + strconv.Itoa(os.Getpid()), "tls")
+			cachedir = path.Join(cachedir, "p"+strconv.Itoa(os.Getpid()), "tls")
 			err = EnsureDir(cachedir)
 			if err != nil {
 				return nil, err
@@ -132,12 +133,14 @@ func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, err
 			return nil, err
 		}
 	}
+	println("so actually here")
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
+		println("should come here")
 		return nil, err
 	}
 	return tls.NewListener(l, &tls.Config{
-		NextProtos: []string{"http/1.1"},
+		NextProtos:   []string{"http/1.1"},
 		Certificates: []tls.Certificate{cert}}), nil
 }
 
@@ -151,5 +154,10 @@ func listen(o listenerOptions) (net.Listener, error) {
 	if err != nil || addr.schema != https {
 		return l, err
 	}
-	return listenTls(l, addr, o)
+	tl, err := listenTls(l, addr, o)
+	if err != nil {
+		println("this error is the one")
+		defer Doretlog42(l.Close)
+	}
+	return tl, err
 }

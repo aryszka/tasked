@@ -1,14 +1,23 @@
 package main
 
 import (
-	"testing"
-	"fmt"
-	"os"
-	"errors"
-	"path"
 	. "code.google.com/p/tasked/testing"
+	"errors"
+	"flag"
+	"fmt"
 	"net"
+	"os"
+	"path"
+	"testing"
 )
+
+var testLong = false
+
+func init() {
+	tl := flag.Bool("test.long", false, "")
+	flag.Parse()
+	testLong = *tl
+}
 
 const (
 	testTlsKey = `-----BEGIN PRIVATE KEY-----
@@ -50,17 +59,17 @@ ja5JCKq4V6B3O32gOEhgAdh6OUE4iWYxGhWd3wYUevdyFw==
 )
 
 type testOptions struct {
-	address string
-	cachedir string
-	key []byte
-	cert []byte
-	keyError error
+	address   string
+	cachedir  string
+	key       []byte
+	cert      []byte
+	keyError  error
 	certError error
 }
 
-func (o *testOptions) Address() string { return o.address }
-func (o *testOptions) Cachedir() string { return o.cachedir }
-func (o *testOptions) TlsKey() ([]byte, error) { return o.key, o.keyError }
+func (o *testOptions) Address() string          { return o.address }
+func (o *testOptions) Cachedir() string         { return o.cachedir }
+func (o *testOptions) TlsKey() ([]byte, error)  { return o.key, o.keyError }
 func (o *testOptions) TlsCert() ([]byte, error) { return o.cert, o.certError }
 
 func TestParseAddress(t *testing.T) {
@@ -68,8 +77,8 @@ func TestParseAddress(t *testing.T) {
 		a, err := parseAddress(addr)
 		if err != errx || errx == nil &&
 			(a.schema != schema(s) ||
-			a.val != v ||
-			a.port != port(p)) {
+				a.val != v ||
+				a.port != port(p)) {
 			t.Log(addr, err, a)
 			t.Fail()
 		}
@@ -167,6 +176,10 @@ func TestGetListenerParams(t *testing.T) {
 }
 
 func TestListenTls(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	o := new(testOptions)
 	o.keyError = errors.New("test error")
 	_, err := listenTls(nil, nil, o)
@@ -260,6 +273,10 @@ func TestListenTls(t *testing.T) {
 }
 
 func TestListen(t *testing.T) {
+	if !testLong {
+		t.Skip()
+	}
+
 	o := new(testOptions)
 	o.address = ":"
 	_, err := listen(o)
@@ -280,15 +297,19 @@ func TestListen(t *testing.T) {
 		defer CloseFatal(t, lb)
 		_, err = listen(new(testOptions))
 		if err == nil {
+			t.Log("here")
 			t.Fail()
 		}
 	}()
 
+	println("starting")
 	o = new(testOptions)
+	o.address = "https:"
 	o.key = []byte("invalid key")
 	func() {
 		_, err = listen(o)
 		if err == nil {
+			println("ever really here")
 			t.Fail()
 		}
 	}()
@@ -296,7 +317,9 @@ func TestListen(t *testing.T) {
 	func() {
 		l, err := listen(new(testOptions))
 		if err != nil {
+			t.Log(err)
 			t.Fail()
+			return
 		}
 		defer CloseFatal(t, l)
 	}()
@@ -304,9 +327,11 @@ func TestListen(t *testing.T) {
 	func() {
 		o = new(testOptions)
 		o.address = "https:"
-		l, err := listen(new(testOptions))
+		l, err := listen(o)
 		if err != nil {
+			t.Log(err)
 			t.Fail()
+			return
 		}
 		defer CloseFatal(t, l)
 	}()
