@@ -39,7 +39,7 @@ type Auth interface {
 	AuthToken([]byte) ([]byte, string, error)
 }
 
-type Settings interface {
+type Options interface {
 	AllowCookies() bool
 	TokenValidity() int // be it the tokenValidity
 }
@@ -54,13 +54,13 @@ type filter struct {
 	cookieMaxAge int
 }
 
-func New(a Auth, s Settings) (share.HttpFilter, error) {
+func New(a Auth, o Options) (share.HttpFilter, error) {
 	if a == nil {
 		return nil, authNotSet
 	}
 	ha := filter{auth: a}
-	if s != nil {
-		ha.allowCookies = s.AllowCookies()
+	if o != nil {
+		ha.allowCookies = o.AllowCookies()
 	}
 	return &ha, nil
 }

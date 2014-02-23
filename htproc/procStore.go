@@ -76,10 +76,10 @@ func (pe *ProcError) Fatal() bool {
 	return pe.Err == procCleanupFailed
 }
 
-func newProcStore(s Settings) *procStore {
+func newProcStore(o Options) *procStore {
 	ps := new(procStore)
-	ps.maxProcs = s.MaxUserProcesses()
-	ps.socketsDir = path.Join(s.CacheDir(), "sockets")
+	ps.maxProcs = o.MaxUserProcesses()
+	ps.socketsDir = path.Join(o.Cachedir(), "sockets")
 	ps.procs = make(map[string]runner)
 	ps.accessed = make(map[string]time.Time)
 	ps.failures = make(map[string][]time.Time)

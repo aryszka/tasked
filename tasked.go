@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	_, err := readSettings()
+	_, err := readOptions()
 	if err != nil {
 		log.Panicln(err)
 	}

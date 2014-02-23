@@ -8,15 +8,15 @@ import (
 
 var authFailed = errors.New("Authentication failed.")
 
-type authSettings struct {
-	s      *settings
-	aesKey string
-	aesIv  string
+type authOptions struct {
+	o      *options
+	aesKey []byte
+	aesIv  []byte
 }
 
-func (as *authSettings) AesKey() string     { return as.aesKey }
-func (as *authSettings) AesIv() string      { return as.aesIv }
-func (as *authSettings) TokenValidity() int { return as.s.TokenValidity() }
+func (ao *authOptions) AesKey() []byte     { return ao.aesKey }
+func (ao *authOptions) AesIv() []byte      { return ao.aesIv }
+func (ao *authOptions) TokenValidity() int { return ao.o.TokenValidity() }
 
 func authPam(user, pwd string) error {
 	t, s := pam.Start("", user, pam.ResponseFunc(func(style int, _ string) (string, bool) {
@@ -39,14 +39,21 @@ func authPam(user, pwd string) error {
 	return nil
 }
 
-func newAuth(s *settings) (*auth.It, error) {
-	if s == nil {
-		s = &settings{}
+func newAuth(o *options) (*auth.It, error) {
+	if o == nil {
+		o = &options{}
 	}
-	as := &authSettings{}
-	as.s = s
-	as.aesKey = s.AesKey()
-	as.aesIv = s.AesIv()
-	// return auth.New(auth.PasswordCheckerFunc(authPam), as)
+	ao := &authOptions{}
+	ao.o = o
+	var err error
+	ao.aesKey, err = o.AesKey()
+	if err != nil {
+		return nil, err
+	}
+	ao.aesIv, err = o.AesIv()
+	if err != nil {
+		return nil, err
+	}
+	// return auth.New(auth.PasswordCheckerFunc(authPam), ao)
 	return nil, nil
 }

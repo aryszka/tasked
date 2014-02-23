@@ -2,7 +2,7 @@ package auth
 
 import (
 	"bytes"
-	tst "code.google.com/p/tasked/testing"
+	. "code.google.com/p/tasked/testing"
 	"crypto/aes"
 	"crypto/rand"
 	"errors"
@@ -79,7 +79,7 @@ func (a *It) pastInvalid() int64 {
 
 func encryptf(t *testing.T, i *It, c int64, u string) []byte {
 	val, err := i.encryptToken(c, u)
-	tst.ErrFatal(t, err)
+	ErrFatal(t, err)
 	return val
 }
 
@@ -113,7 +113,7 @@ func TestTokenEncryptDecrypt(t *testing.T) {
 	c = 42
 	u = "some"
 	v, err = i.encryptToken(c, u)
-	tst.ErrFatal(t, err)
+	ErrFatal(t, err)
 	tiv := i.iv
 	i.iv = makeKey()
 	_, _, err = i.decryptToken(v)
@@ -159,6 +159,40 @@ func TestEncryption(t *testing.T) {
 	}
 }
 
+func TestNew(t *testing.T) {
+	_, err := New(nil, nil)
+	if err == nil {
+		t.Fail()
+	}
+
+	testError := errors.New("test error")
+	pcf := PasswordCheckerFunc(func(u, p string) error {
+		return testError
+	})
+	a, err := New(pcf, nil)
+	if err != nil || a == nil ||
+		a.checker.Check("", "") != testError ||
+		len(a.key) != aes.BlockSize || len(a.iv) != aes.BlockSize ||
+		a.tokenValidity != 0 || a.renewThreshold != 0 {
+		t.Fail()
+	}
+
+	iv := make([]byte, 1.5 * aes.BlockSize)
+	_, err = rand.Read(iv)
+	ErrFatal(t, err)
+	a, err = New(pcf, &testConfig{
+		aesKey: []byte("012"),
+		aesIv: iv,
+		tokenValidity: 30})
+	if err != nil || a == nil ||
+		len(a.key) != aes.BlockSize ||
+		len(a.iv) != aes.BlockSize ||
+		a.tokenValidity != 30 * time.Second ||
+		a.renewThreshold != time.Duration(float64(a.tokenValidity) * renewThresholdRate) {
+		t.Fail()
+	}
+}
+
 func TestAuthPwd(t *testing.T) {
 	i := defaultInstance()
 	tk, err := i.AuthPwd("c", "c")
@@ -178,19 +212,19 @@ func TestAuthToken(t *testing.T) {
 		t.Fail()
 	}
 	tk, err := i.encryptToken(i.pastInvalid(), "c")
-	tst.ErrFatal(t, err)
+	ErrFatal(t, err)
 	_, _, err = i.AuthToken(tk)
 	if err != invalidToken {
 		t.Fail()
 	}
 	tk, err = i.encryptToken(i.pastNoRefresh(), "c")
-	tst.ErrFatal(t, err)
+	ErrFatal(t, err)
 	tback, u, err := i.AuthToken(tk)
 	if !bytes.Equal(tback, tk) || u != "c" || err != nil {
 		t.Fail()
 	}
 	tk, err = i.encryptToken(i.pastRefresh(), "c")
-	tst.ErrFatal(t, err)
+	ErrFatal(t, err)
 	tback, u, err = i.AuthToken(tk)
 	if bytes.Equal(tback, tk) || u != "c" || err != nil {
 		t.Fail()
@@ -209,7 +243,7 @@ func TestAuthFull(t *testing.T) {
 	}
 }
 
-func TestEncryptionOfLongData(t *testing.T) {
+func TestEncryptionOfLargeData(t *testing.T) {
 	i := defaultInstance()
 	data := makeRandom(1 << 18)
 	encrypted, err := i.crypt(data)

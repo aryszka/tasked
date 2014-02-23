@@ -50,7 +50,7 @@ type handler struct {
 	maxSearchResults int
 }
 
-type Settings interface {
+type Options interface {
 	Root() string
 	MaxRequestBody() int64
 	MaxSearchResults() int
@@ -586,12 +586,12 @@ func queryNoCmd(w http.ResponseWriter, r *http.Request, f queryHandler) {
 	}
 }
 
-func New(s Settings) (http.Handler, error) {
+func New(o Options) (http.Handler, error) {
 	var h handler
-	if s != nil {
-		h.dn = s.Root()
-		h.maxRequestBody = s.MaxRequestBody()
-		h.maxSearchResults = s.MaxSearchResults()
+	if o != nil {
+		h.dn = o.Root()
+		h.maxRequestBody = o.MaxRequestBody()
+		h.maxSearchResults = o.MaxSearchResults()
 	}
 	if len(h.dn) == 0 {
 		wd, err := os.Getwd()

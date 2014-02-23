@@ -10,7 +10,7 @@ Running
 HTTP API
 --------
 
-Settings
+Options
 --------
 
 ### Evaluation rules of config, environment and flags.

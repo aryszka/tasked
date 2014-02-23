@@ -309,7 +309,7 @@ h3I2CsHAUTwxT1ca8SGLCsFTm03AyXaU0Q061+RX1Do/Iw==
 }
 
 func TestReadFile(t *testing.T) {
-	d := path.Join(Testdir, "settings")
+	d := path.Join(Testdir, "options")
 	EnsureDirF(t, d)
 	f := path.Join(d, "file")
 
@@ -328,7 +328,7 @@ func TestReadFile(t *testing.T) {
 }
 
 func TestExpandEntries(t *testing.T) {
-	d := path.Join(Testdir, "settings")
+	d := path.Join(Testdir, "options")
 	EnsureDirF(t, d)
 	f := path.Join(d, "file")
 	includeKey := "include-config"

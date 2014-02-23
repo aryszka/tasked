@@ -20,20 +20,20 @@ func init() {
 	testLong = *tl
 }
 
-type testSettings struct {
+type testOptions struct {
 	maxProcesses  int
 	dialTimeout   time.Duration
-	idleTimeout   time.Duration
-	workdir string
+	idleTimeout   int
+	cachedir string
 }
 
-func (s *testSettings) MaxProcesses() int          { return s.maxProcesses }
-func (s *testSettings) DialTimeout() time.Duration { return s.dialTimeout }
-func (s *testSettings) IdleTimeout() time.Duration { return s.idleTimeout }
-func (s *testSettings) Workdir() string { return s.workdir }
+func (o *testOptions) MaxUserProcesses() int          { return o.maxProcesses }
+func (o *testOptions) DialTimeout() time.Duration     { return o.dialTimeout }
+func (o *testOptions) ProcessIdleTime() int           { return o.idleTimeout }
+func (o *testOptions) Cachedir() string               { return o.cachedir }
 
 func TestNew(t *testing.T) {
-	p := New(&testSettings{})
+	p := New(&testOptions{})
 	if p.procStore == nil {
 		t.Fail()
 	}
@@ -57,7 +57,7 @@ func TestFilter(t *testing.T) {
 	}
 
 	// no user
-	f = New(&testSettings{})
+	f = New(&testOptions{})
 	data = nil
 	Htreq(t, "GET", S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK || handled {
@@ -66,7 +66,7 @@ func TestFilter(t *testing.T) {
 	})
 
 	// procStoreClosed
-	f = New(&testSettings{})
+	f = New(&testOptions{})
 	close(f.procStore.exit)
 	data = "user0"
 	Htreq(t, "GET", S.URL, nil, func(rsp *http.Response) {
@@ -76,7 +76,7 @@ func TestFilter(t *testing.T) {
 	})
 
 	// banned
-	f = New(&testSettings{})
+	f = New(&testOptions{})
 	f.procStore.banned["user0"] = time.Now()
 	data = "user0"
 	WithTimeout(t, eto, func() {
@@ -91,7 +91,7 @@ func TestFilter(t *testing.T) {
 	})
 
 	// mirror teapot
-	f = New(&testSettings{workdir: Testdir})
+	f = New(&testOptions{cachedir: Testdir})
 	data = "user0"
 	WithTimeout(t, exitTimeout, func() {
 		w := Wait(func() { f.procStore.run(nil) })
@@ -116,7 +116,7 @@ func TestFilter(t *testing.T) {
 	})
 
 	// can't connect
-	f = New(&testSettings{})
+	f = New(&testOptions{})
 	data = "user0"
 	args = []string{"noop"}
 	WithTimeout(t, exitTimeout, func() {
@@ -131,7 +131,7 @@ func TestFilter(t *testing.T) {
 	})
 
 	// proc closed
-	f = New(&testSettings{})
+	f = New(&testOptions{})
 	data = "user0"
 	args = []string{"wait", "4500"}
 	WithTimeout(t, exitTimeout, func() {
@@ -152,7 +152,7 @@ func TestFilter(t *testing.T) {
 }
 
 func TestServeHTTP(t *testing.T) {
-	p := New(&testSettings{})
+	p := New(&testOptions{})
 	w := Wait(func() {
 		err := p.Run(nil)
 		if err != nil {

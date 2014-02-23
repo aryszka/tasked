@@ -43,19 +43,19 @@ func TestNewAuth(t *testing.T) {
 		if a == nil || err != nil {
 			t.Fail()
 		}
-		s := &settings{}
+		o := &options{}
 		kp := path.Join(tst.Testdir, "keyFile")
 		tst.RemoveIfExistsF(t, kp)
-		s.sec.aes.keyFile = kp
-		a, err = newAuth(s)
+		o.sec.aes.keyFile = kp
+		a, err = newAuth(o)
 		if err == nil {
 			t.Fail()
 		}
-		s = &settings{}
+		o = &options{}
 		ki := path.Join(tst.Testdir, "ivFile")
 		tst.RemoveIfExistsF(t, ki)
-		s.sec.aes.ivFile = ki
-		a, err = newAuth(s)
+		o.sec.aes.ivFile = ki
+		a, err = newAuth(o)
 		if err == nil {
 			t.Fail()
 		}

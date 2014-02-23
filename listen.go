@@ -2,93 +2,154 @@ package main
 
 import (
 	"crypto/tls"
-	"io/ioutil"
 	"net"
 	"os"
+	"regexp"
+	"errors"
+	"strconv"
+	"path"
+	. "code.google.com/p/tasked/share"
+	"fmt"
 )
 
 const noTlsWarning = "TLS has not been configured."
 
-func readKey(fn string) ([]byte, error) {
-	if fn == "" {
-		return nil, nil
+type schema string
+type port uint16
+
+const (
+	http schema = "http"
+	https schema = "https"
+	unix schema = "unix"
+	defaultPort port = 9090
+	defaultUnixAddressFmt = "nlet-%d"
+)
+
+type listenerOptions interface {
+	Address() string
+	Cachedir() string
+	TlsKey() ([]byte, error)
+	TlsCert() ([]byte, error)
+}
+
+type address struct {
+	schema schema
+	val string
+	port port
+}
+
+var (
+	addressRx = regexp.MustCompile(
+		"^((((https?)|(unix)):)?((/{0,2}(([^:]*)|(\\[.*\\])))(:(\\d+))?)$)|" +
+		"(unix:(.*)$)")
+	invalidAddress = errors.New("Invalid address.")
+)
+
+func parseAddress(s string) (*address, error) {
+	m := addressRx.FindStringSubmatch(s)
+	if len(m) == 0 {
+		return nil, invalidAddress
 	}
-	key, err := ioutil.ReadFile(fn)
-	if os.IsNotExist(err) {
-		return nil, nil
+	sch := schema(m[3])
+	anyAddr := m[6]
+	tcpAddr := m[8]
+	tcpPort := m[12]
+	unixAddr := m[14]
+	a := new(address)
+	switch {
+	case sch == unix:
+		a.schema = unix
+		a.val = anyAddr
+		return a, nil
+	case unixAddr != "":
+		a.schema = unix
+		a.val = unixAddr
+		return a, nil
+	default:
+		a.schema = sch
+		a.val = tcpAddr
+		if tcpPort != "" {
+			p, err := strconv.Atoi(tcpPort)
+			if err != nil {
+				return nil, err
+			}
+			a.port = port(p)
+		} 
+		return a, nil
 	}
-	return key, err
 }
 
-func selfCert() {
+func getListenerParams(addr *address) (string, string) {
+	n := "tcp"
+	a := addr.val
+	if addr.schema == unix {
+		n = "unixpacket"
+		if a == "" {
+			a = fmt.Sprintf(defaultUnixAddressFmt, os.Getpid())
+		}
+	} else {
+		p := addr.port
+		if p <= 0 {
+			p = 9090
+		}
+		a += ":" + strconv.FormatUint(uint64(p), 10)
+	}
+	return n, a
 }
 
-func getTcpSettings(s *settings) ([]byte, []byte, string, error) {
-	/*
-		var (
-			tlsKey, tlsCert []byte
-			address         string
-			err             error
-		)
-		if s != nil {
-			tlsKey, err = s.TlsKey()
-			if err != nil {
-				return nil, nil, "", err
-			}
-			tlsCert, err = s.TlsCert()
-			if err != nil {
-				return nil, nil, "", err
-			}
-			address = s.Address()
-		}
-		if len(tlsKey) == 0 || len(tlsCert) == 0 {
-			log.Println(noTlsWarning)
-		}
-		if len(tlsKey) == 0 {
-			tlsKey = []byte(defaultTlsKey)
-		}
-		if len(tlsCert) == 0 {
-			tlsCert = []byte(defaultTlsCert)
-		}
-		if address == "" {
-			address = defaultAddress
-		}
-		return tlsKey, tlsCert, address, nil
-	*/
-	return nil, nil, "", nil
-}
-
-func listenTcp(s *settings) (net.Listener, error) {
-	tlsKey, tlsCert, address, err := getTcpSettings(s)
+func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, error) {
+	tlsKey, err := o.TlsKey()
 	if err != nil {
 		return nil, err
+	}
+	tlsCert, err := o.TlsCert()
+	if err != nil {
+		return nil, err
+	}
+	if len(tlsKey) == 0 && len(tlsCert) == 0 {
+		var host interface{}
+		if len(a.val) > 0 {
+			ip := net.ParseIP(a.val)
+			if ip == nil && a.val[0] == '[' && a.val[len(a.val) - 1] == ']' {
+				ip = net.ParseIP(a.val[1:len(a.val)-1])
+			}
+			if ip == nil {
+				host = a.val
+			} else {
+				host = ip
+			}
+		}
+		cachedir := o.Cachedir()
+		if cachedir != "" {
+			cachedir = path.Join(cachedir, "p" + strconv.Itoa(os.Getpid()), "tls")
+			err = EnsureDir(cachedir)
+			if err != nil {
+				return nil, err
+			}
+		}
+		tlsKey, tlsCert, err = selfCert(host, cachedir)
+		if err != nil {
+			return nil, err
+		}
 	}
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
 		return nil, err
 	}
-	l, err := net.Listen("tcp", address)
+	return tls.NewListener(l, &tls.Config{
+		NextProtos: []string{"http/1.1"},
+		Certificates: []tls.Certificate{cert}}), nil
+}
+
+func listen(o listenerOptions) (net.Listener, error) {
+	addr, err := parseAddress(o.Address())
 	if err != nil {
 		return nil, err
 	}
-	l = tls.NewListener(l, &tls.Config{
-		NextProtos:   []string{"http/1.1"},
-		Certificates: []tls.Certificate{cert}})
-	return l, nil
-}
-
-func listenUnix(s *settings) (net.Listener, error) {
-	var (
-		l   net.Listener
-		err error
-	)
-	addr := s.Address()
-	if err = os.Remove(addr); err != nil && !os.IsNotExist(err) {
+	n, a := getListenerParams(addr)
+	l, err := net.Listen(n, a)
+	if err != nil || addr.schema != https {
 		return l, err
 	}
-	return net.Listen("unixpacket", addr)
+	return listenTls(l, addr, o)
 }
-
-// shall it be able to listen on multiple channels?
-// no: use multiple processes. check if it is possible to differentiate between unix and tcp address, and if
-// yes, then use only one address flag.

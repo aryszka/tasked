@@ -339,3 +339,7 @@ func Wait(f func()) chan int {
 	}()
 	return w
 }
+
+func CloseFatal(t Fataler, c io.Closer) {
+	ErrFatal(t, c.Close())
+}

@@ -25,7 +25,7 @@ func TestProcError(t *testing.T) {
 }
 
 func TestNewProcStore(t *testing.T) {
-	ps := newProcStore(&testSettings{maxProcesses: 12})
+	ps := newProcStore(&testOptions{maxProcesses: 12})
 	if ps.maxProcs != 12 {
 		t.Fail()
 	}

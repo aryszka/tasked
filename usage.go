@@ -7,7 +7,7 @@ include-config     filename none
 # general
 root               filename none # also as default parameter, when not set then serving stdio
 cachedir           filename none
-max-search-results int      0 # search disabled
+max-search-results int      0 # search disabled default
 
 # http
 address            string   :9090 # when filename, then unix socket

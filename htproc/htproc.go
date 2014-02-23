@@ -5,10 +5,10 @@ import (
 	"net/http"
 )
 
-type Settings interface {
+type Options interface {
 	MaxUserProcesses() int
 	ProcessIdleTime() int
-	CacheDir() string
+	Cachedir() string
 }
 
 type ProcFilter struct {
@@ -19,10 +19,10 @@ type ProcFilter struct {
 	procStore *procStore
 }
 
-func New(s Settings) *ProcFilter {
-	// todo: validate settings, apply defaults if not set
+func New(o Options) *ProcFilter {
+	// todo: validate options, apply defaults if not set
 	f := new(ProcFilter)
-	f.procStore = newProcStore(s)
+	f.procStore = newProcStore(o)
 	return f
 }
 

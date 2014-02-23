@@ -10,14 +10,10 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"errors"
-	"log"
 	"time"
 )
 
-const (
-	defaultTokenValidity = 60 * 60 * 24 * 90
-	renewThresholdRate   = 0.1
-)
+const renewThresholdRate = 0.1
 
 var (
 	invalidToken      = errors.New("Invalid token.")
@@ -38,8 +34,8 @@ func (f PasswordCheckerFunc) Check(username, password string) error {
 	return f(username, password)
 }
 
-// A type that implements Settings can be used to pass initialization values to the new instances of auth.It.
-type Settings interface {
+// A type that implements Options can be used to pass initialization values to the new instances of auth.It.
+type Options interface {
 	AesKey() []byte     // AES key used for encryption
 	AesIv() []byte      // AES iv used for encryption
 	TokenValidity() int // Validity duration of the generated authentication tokens in seconds.
@@ -57,41 +53,6 @@ type It struct {
 	renewThreshold time.Duration
 
 	checker PasswordChecker
-}
-
-// Initializes an authentication instance by setting the key and iv for AES, and setting the token expiration
-// interval. It expects an implementation of PasswordChecker, which will be used to check user credentials when
-// AuthPwd is called. The names of files containing the AES key and iv must be set. The token expiration's
-// default is 90 days.
-func New(c PasswordChecker, s Settings) (*It, error) {
-	if c == nil {
-		return nil, noPasswordChecker
-	}
-	var (
-		i             It
-		tokenValidity int
-	)
-	i.checker = c
-	if s != nil {
-		i.key = s.AesKey()
-		i.iv = s.AesIv()
-		tokenValidity = s.TokenValidity()
-	}
-	if len(i.key) == 0 || len(i.iv) == 0 {
-		log.Println("AES has not been configured.")
-	}
-	if len(i.key) == 0 {
-		i.key = make([]byte, aes.BlockSize)
-	}
-	if len(i.iv) == 0 {
-		i.iv = make([]byte, aes.BlockSize)
-	}
-	if tokenValidity == 0 {
-		tokenValidity = defaultTokenValidity
-	}
-	i.tokenValidity = time.Duration(tokenValidity) * time.Second
-	i.renewThreshold = time.Duration(float64(i.tokenValidity) * renewThresholdRate)
-	return &i, nil
 }
 
 // crypting with AES CTR
@@ -127,6 +88,27 @@ func (a *It) encryptToken(c int64, u string) ([]byte, error) {
 	binary.PutVarint(b[len(a.iv):], c)
 	copy(b[cap-len(u):], u)
 	return a.crypt(b)
+}
+
+// Initializes an authentication instance by setting the key and iv for AES, and setting the token expiration
+// interval. It expects an implementation of PasswordChecker, which will be used to check user credentials when
+// AuthPwd is called.
+func New(c PasswordChecker, o Options) (*It, error) {
+	if c == nil {
+		return nil, noPasswordChecker
+	}
+	a := new(It)
+	a.checker = c
+	a.key = make([]byte, aes.BlockSize)
+	a.iv = make([]byte, aes.BlockSize)
+	if o == nil {
+		return a, nil
+	}
+	copy(a.key, o.AesKey())
+	copy(a.iv, o.AesIv())
+	a.tokenValidity = time.Duration(o.TokenValidity()) * time.Second
+	a.renewThreshold = time.Duration(float64(a.tokenValidity) * renewThresholdRate)
+	return a, nil
 }
 
 // Checks if the provided username and password are correct. If yes, an authentication token is returned,
