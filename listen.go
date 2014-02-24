@@ -18,9 +18,9 @@ type schema string
 type port uint16
 
 const (
-	http                  schema = "http"
-	https                 schema = "https"
-	unix                  schema = "unix"
+	schemaHttp            schema = "http"
+	schemaHttps           schema = "https"
+	schemaUnix            schema = "unix"
 	defaultPort           port   = 9090
 	defaultUnixAddressFmt        = "nlet-%d"
 )
@@ -57,12 +57,12 @@ func parseAddress(s string) (*address, error) {
 	unixAddr := m[14]
 	a := new(address)
 	switch {
-	case sch == unix:
-		a.schema = unix
+	case sch == schemaUnix:
+		a.schema = schemaUnix
 		a.val = anyAddr
 		return a, nil
 	case unixAddr != "":
-		a.schema = unix
+		a.schema = schemaUnix
 		a.val = unixAddr
 		return a, nil
 	default:
@@ -82,7 +82,7 @@ func parseAddress(s string) (*address, error) {
 func getListenerParams(addr *address) (string, string) {
 	n := "tcp"
 	a := addr.val
-	if addr.schema == unix {
+	if addr.schema == schemaUnix {
 		n = "unixpacket"
 		if a == "" {
 			a = fmt.Sprintf(defaultUnixAddressFmt, os.Getpid())
@@ -151,7 +151,7 @@ func listen(o listenerOptions) (net.Listener, error) {
 	}
 	n, a := getListenerParams(addr)
 	l, err := net.Listen(n, a)
-	if err != nil || addr.schema != https {
+	if err != nil || addr.schema != schemaHttps {
 		return l, err
 	}
 	tl, err := listenTls(l, addr, o)

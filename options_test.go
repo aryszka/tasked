@@ -57,38 +57,89 @@ func TestFieldOrFile(t *testing.T) {
 	if err != nil || !bytes.Equal(b, []byte("hello")) {
 		t.Fail()
 	}
+
+	b, err = fieldOrFile("", "")
+	if len(b) > 0 || err != nil {
+		t.Fail()
+	}
+}
+
+func TestParseCommand(t *testing.T) {
+	defer func(args []string) { os.Args = args }(os.Args)
+
+	os.Args = []string{"tasked"}
+	_, err := parseCommand()
+	if err != missingCommand {
+		t.Fail()
+	}
+
+	os.Args = []string{"tasked", "no-command"}
+	_, err = parseCommand()
+	if err != invalidCommand {
+		t.Fail()
+	}
+
+	for _, cmd := range []string{
+		cmdHelp,
+		cmdServe,
+		cmdOptions,
+		cmdHead,
+		cmdSearch,
+		cmdGet,
+		cmdProps,
+		cmdModprops,
+		cmdPut,
+		cmdCopy,
+		cmdRename,
+		cmdDelete,
+		cmdMkdir,
+		cmdPost,
+		cmdSync} {
+		os.Args = []string{"tasked", cmd}
+		pcmd, err := parseCommand()
+		if pcmd != cmd || err != nil {
+			t.Fail()
+		}
+	}
 }
 
 func TestParseFlags(t *testing.T) {
-	defer func(args []string, fs *flag.FlagSet, stderr *os.File) {
+	defer func(args []string, ofe flag.ErrorHandling, stderr *os.File) {
 		os.Args = args
-		flag.CommandLine = fs
+		onFlagError = ofe
 		os.Stderr = stderr
-	}(os.Args, flag.CommandLine, os.Stderr)
+	}(os.Args, onFlagError, os.Stderr)
 
 	// none set
-	os.Args = []string{"cmd"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
-	e := parseFlags()
-	if len(e) != 0 {
+	os.Args = []string{"tasked", "cmd"}
+	e, a := parseFlags()
+	if len(e) != 0 || len(a) != 0 {
+		t.Fail()
+	}
+
+	// free args returned
+	os.Args = []string{"tasked", "cmd", "arg0", "arg1"}
+	_, a = parseFlags()
+	if len(a) != 2 || a[0] != "arg0" || a[1] != "arg1" {
 		t.Fail()
 	}
 
 	// all set
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
-	os.Args = []string{"cmd",
+	os.Args = []string{"tasked", "cmd",
 		"-" + includeConfigKey, "some-file",
 
+		"-" + helpKey,
 		"-" + rootKey, "some-file-0",
 		"-" + cachedirKey, "some-file-1",
-		"-" + maxSearchResultsKey, "15",
+		"-" + allowCookiesKey,
+		"-" + runasKey, "testuser",
 
 		"-" + addressKey, "some-file-2",
 		"-" + tlsKeyKey, "some-data-0",
 		"-" + tlsCertKey, "some-data-1",
 		"-" + tlsKeyFileKey, "some-file-3",
 		"-" + tlsCertFileKey, "some-file-4",
-		"-" + allowCookiesKey,
+		"-" + maxSearchResultsKey, "15",
 		"-" + maxRequestBodyKey, "16",
 		"-" + maxRequestHeaderKey, "17",
 		"-" + proxyKey, "{}",
@@ -105,22 +156,22 @@ func TestParseFlags(t *testing.T) {
 		"-" + processIdleTimeKey, "20",
 
 		"not flag"}
-	e = parseFlags()
+	e, _ = parseFlags()
 	testEntries(t, e,
-		&keyval.Entry{Key: argKey, Val: "not flag"},
-
 		&keyval.Entry{Key: includeConfigKey, Val: "some-file"},
 
+		&keyval.Entry{Key: helpKey, Val: "true"},
 		&keyval.Entry{Key: rootKey, Val: "some-file-0"},
 		&keyval.Entry{Key: cachedirKey, Val: "some-file-1"},
-		&keyval.Entry{Key: maxSearchResultsKey, Val: "15"},
+		&keyval.Entry{Key: allowCookiesKey, Val: "true"},
+		&keyval.Entry{Key: runasKey, Val: "testuser"},
 
 		&keyval.Entry{Key: addressKey, Val: "some-file-2"},
 		&keyval.Entry{Key: tlsKeyKey, Val: "some-data-0"},
 		&keyval.Entry{Key: tlsCertKey, Val: "some-data-1"},
 		&keyval.Entry{Key: tlsKeyFileKey, Val: "some-file-3"},
 		&keyval.Entry{Key: tlsCertFileKey, Val: "some-file-4"},
-		&keyval.Entry{Key: allowCookiesKey, Val: "true"},
+		&keyval.Entry{Key: maxSearchResultsKey, Val: "15"},
 		&keyval.Entry{Key: maxRequestBodyKey, Val: "16"},
 		&keyval.Entry{Key: maxRequestHeaderKey, Val: "17"},
 		&keyval.Entry{Key: proxyKey, Val: "{}"},
@@ -142,14 +193,46 @@ func TestParseFlags(t *testing.T) {
 	fakeStderr := path.Join(d, "fake-stderr")
 	WithNewFileF(t, fakeStderr, func(f *os.File) error {
 		os.Stderr = f
-		os.Args = []string{"cmd", "-" + includeConfigKey}
-		flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
+		os.Args = []string{"tasked", "cmd", "-" + includeConfigKey}
+		onFlagError = flag.ContinueOnError
 		parseFlags()
 		return nil
 	})
 	output, err := ioutil.ReadFile(fakeStderr)
 	ErrFatal(t, err)
 	if strings.Index(string(output), usage) < 0 {
+		t.Fail()
+	}
+}
+
+func TestHasHelpFlag(t *testing.T) {
+	has := hasHelpFlag(nil)
+	if has {
+		t.Fail()
+	}
+
+	has = hasHelpFlag([]*keyval.Entry{&keyval.Entry{"somekey", "someval"}})
+	if has {
+		t.Fail()
+	}
+
+	has = hasHelpFlag([]*keyval.Entry{
+		&keyval.Entry{"somekey", "someval"},
+		&keyval.Entry{helpKey, "someval"}})
+	if !has {
+		t.Fail()
+	}
+}
+
+func TestGetIncludes(t *testing.T) {
+	i := getIncludes(nil)
+	if len(i) != 4 {
+		t.Fail()
+	}
+
+	i = getIncludes([]*keyval.Entry{&keyval.Entry{
+		Key: includeConfigKey, Val: "some-file"}})
+	if len(i) != 5 || i[4] != "some-file" {
 		t.Fail()
 	}
 }
@@ -165,16 +248,47 @@ func TestApplyDefaults(t *testing.T) {
 	}
 }
 
+func TestApplyFreeArgs(t *testing.T) {
+	o := new(options)
+	o.command = cmdHelp
+	err := applyFreeArgs(o, []string{"some0", "some1", "some2"})
+	if err != nil {
+		t.Fail()
+	}
+
+	o = new(options)
+	o.command = cmdServe
+	err = applyFreeArgs(o, []string{"some0", "some1", "some2"})
+	if err != invalidArgs {
+		t.Fail()
+	}
+
+	o = new(options)
+	o.command = cmdServe
+	err = applyFreeArgs(o, []string{"some0", "some1"})
+	if err != nil || o.root != "some0" || o.address != "some1" {
+		t.Log("here", err, o.root, o.address)
+		t.Fail()
+	}
+
+	o = new(options)
+	o.command = cmdServe
+	err = applyFreeArgs(o, []string{"some0"})
+	if err != nil || o.root != "some0" {
+		t.Fail()
+	}
+}
+
 func TestParseOptions(t *testing.T) {
 	// none
 	o := new(options)
 	err := parseOptions(o, nil)
 	if err != nil || o == nil ||
-		o.command != "" ||
-		len(o.args) != 0 ||
 		o.root != "" ||
 		o.cachedir != "" ||
 		o.maxSearchResults != 0 ||
+		o.runas != "" ||
+
 		o.address != "" ||
 		o.tlsKey != "" ||
 		o.tlsCert != "" ||
@@ -202,13 +316,11 @@ func TestParseOptions(t *testing.T) {
 	o = new(options)
 	err = parseOptions(o, []*keyval.Entry{
 		&keyval.Entry{Val: "not flag"},
-		&keyval.Entry{Key: argKey, Val: "command"},
-		&keyval.Entry{Key: argKey, Val: "arg0"},
-		&keyval.Entry{Key: argKey, Val: "arg1"},
 
 		&keyval.Entry{Key: rootKey, Val: "some-file-0"},
 		&keyval.Entry{Key: cachedirKey, Val: "some-file-1"},
 		&keyval.Entry{Key: maxSearchResultsKey, Val: "15"},
+		&keyval.Entry{Key: runasKey, Val: "testuser"},
 
 		&keyval.Entry{Key: addressKey, Val: "some-file-2"},
 		&keyval.Entry{Key: tlsKeyKey, Val: "some-data-0"},
@@ -231,14 +343,10 @@ func TestParseOptions(t *testing.T) {
 		&keyval.Entry{Key: maxUserProcessesKey, Val: "19"},
 		&keyval.Entry{Key: processIdleTimeKey, Val: "20"}})
 	if err != nil || o == nil ||
-		o.command != "command" ||
-		len(o.args) != 2 ||
-		o.args[0] != "arg0" ||
-		o.args[1] != "arg1" ||
-
 		o.root != "some-file-0" ||
 		o.cachedir != "some-file-1" ||
 		o.maxSearchResults != 15 ||
+		o.runas != "testuser" ||
 
 		o.address != "some-file-2" ||
 		o.tlsKey != "some-data-0" ||
@@ -319,13 +427,12 @@ func TestParseOptions(t *testing.T) {
 }
 
 func TestReadOptions(t *testing.T) {
-	defer func(sc, hk string, args []string, fs *flag.FlagSet, stderr *os.File) {
+	defer func(sc, hk string, args []string, stderr *os.File) {
 		sysConfig = sc
 		userHomeKey = hk
 		os.Args = args
-		flag.CommandLine = fs
 		os.Stderr = stderr
-	}(sysConfig, userHomeKey, os.Args, flag.CommandLine, os.Stderr)
+	}(sysConfig, userHomeKey, os.Args, os.Stderr)
 
 	sc := path.Join(Testdir, "sysconfig")
 	sysConfig = sc
@@ -345,18 +452,88 @@ func TestReadOptions(t *testing.T) {
 	err = os.Setenv(envFilename, ef)
 	ErrFatal(t, err)
 
+	// command parse fails
+	fakeStderr := path.Join(Testdir, "stderr")
+	WithNewFileF(t, fakeStderr, func(f *os.File) error {
+		os.Stderr = f
+		os.Args = []string{"tasked", "no command"}
+		_, err = readOptions()
+		if err == nil {
+			t.Fail()
+		}
+		return nil
+	})
+	output, err := ioutil.ReadFile(fakeStderr)
+	ErrFatal(t, err)
+	if strings.Index(string(output), usage) < 0 {
+		t.Fail()
+	}
+
+	// command parsed
+	os.Args = []string{"tasked", cmdServe}
+	o, err := readOptions()
+	if err != nil || o.Command() != cmdServe {
+		t.Fail()
+	}
+
+	// help flag
+	fakeStderr = path.Join(Testdir, "stderr")
+	WithNewFileF(t, fakeStderr, func(f *os.File) error {
+		os.Stderr = f
+		os.Args = []string{"tasked", cmdServe, "-help", "me"}
+		o, err := readOptions()
+		if err != nil || o != nil {
+			t.Fail()
+		}
+		return nil
+	})
+	output, err = ioutil.ReadFile(fakeStderr)
+	ErrFatal(t, err)
+	if strings.Index(string(output), usage) < 0 {
+		t.Fail()
+	}
+
+	// free args fail
+	fakeStderr = path.Join(Testdir, "stderr")
+	WithNewFileF(t, fakeStderr, func(f *os.File) error {
+		os.Stderr = f
+		os.Args = []string{"tasked", cmdServe, "arg0", "arg1", "arg2"}
+		_, err := readOptions()
+		if err != invalidArgs {
+			t.Fail()
+		}
+		return nil
+	})
+	output, err = ioutil.ReadFile(fakeStderr)
+	ErrFatal(t, err)
+	if strings.Index(string(output), usage) < 0 {
+		t.Fail()
+	}
+
+	// free args
+	RemoveIfExistsF(t, sc)
+	RemoveIfExistsF(t, uhc)
+	RemoveIfExistsF(t, efa)
+	RemoveIfExistsF(t, ef)
+	os.Args = []string{"tasked", cmdServe, "arg0", "arg1"}
+	o, err = readOptions()
+	if err != nil || o.Command() != cmdServe ||
+		o.Root() != "arg0" || o.Address() != "arg1" {
+		t.Fail()
+	}
+
 	// empty
 	RemoveIfExistsF(t, sc)
 	RemoveIfExistsF(t, uhc)
 	RemoveIfExistsF(t, efa)
 	RemoveIfExistsF(t, ef)
-	os.Args = []string{"cmd"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
-	o, err := readOptions()
+	os.Args = []string{"tasked", cmdServe}
+	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != "" ||
 		o.cachedir != "" ||
 		o.maxSearchResults != 0 ||
+		o.runas != "" ||
 
 		o.address != defaultAddress ||
 		o.tlsKey != "" ||
@@ -378,6 +555,7 @@ func TestReadOptions(t *testing.T) {
 		o.tokenValidity != defaultTokenValidity ||
 		o.maxUserProcesses != 0 ||
 		o.processIdleTime != defaultProcessIdleTime {
+		t.Log("here", err)
 		t.Fail()
 	}
 
@@ -391,13 +569,13 @@ func TestReadOptions(t *testing.T) {
 	RemoveIfExistsF(t, uhc)
 	RemoveIfExistsF(t, efa)
 	RemoveIfExistsF(t, ef)
-	os.Args = []string{"cmd"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
+	os.Args = []string{"tasked", cmdServe}
 	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != d0 ||
 		o.cachedir != "" ||
 		o.maxSearchResults != 0 ||
+		o.runas != "" ||
 
 		o.address != defaultAddress ||
 		o.tlsKey != "" ||
@@ -436,13 +614,13 @@ func TestReadOptions(t *testing.T) {
 	})
 	RemoveIfExistsF(t, efa)
 	RemoveIfExistsF(t, ef)
-	os.Args = []string{"cmd"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
+	os.Args = []string{"tasked", cmdServe}
 	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != d1 ||
 		o.cachedir != cd0 ||
 		o.maxSearchResults != 0 ||
+		o.runas != "" ||
 
 		o.address != defaultAddress ||
 		o.tlsKey != "" ||
@@ -487,13 +665,13 @@ func TestReadOptions(t *testing.T) {
 		return err
 	})
 	RemoveIfExistsF(t, ef)
-	os.Args = []string{"cmd"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
+	os.Args = []string{"tasked", cmdServe}
 	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != d2 ||
 		o.cachedir != cd1 ||
 		o.maxSearchResults != msr0 ||
+		o.runas != "" ||
 
 		o.address != defaultAddress ||
 		o.tlsKey != "" ||
@@ -545,13 +723,13 @@ func TestReadOptions(t *testing.T) {
 		_, err := f.Write([]byte(rootKey + "=" + d3))
 		return err
 	})
-	os.Args = []string{"cmd"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
+	os.Args = []string{"tasked", cmdServe}
 	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != d3 ||
 		o.cachedir != cd2 ||
 		o.maxSearchResults != msr1 ||
+		o.runas != "" ||
 
 		o.address != ad0 ||
 		o.tlsKey != "" ||
@@ -613,14 +791,14 @@ func TestReadOptions(t *testing.T) {
 		_, err := f.Write([]byte(rootKey + "=" + d4))
 		return err
 	})
-	os.Args = []string{"cmd",
+	os.Args = []string{"tasked", cmdServe,
 		"-" + includeConfigKey, ic}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
 	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != d4 ||
 		o.cachedir != cd3 ||
 		o.maxSearchResults != msr2 ||
+		o.runas != "" ||
 
 		o.address != ad1 ||
 		o.tlsKey != tk0 ||
@@ -687,15 +865,15 @@ func TestReadOptions(t *testing.T) {
 		return err
 	})
 	d5 := path.Join(Testdir, "dir5")
-	os.Args = []string{"cmd",
+	os.Args = []string{"tasked", cmdServe,
 		"-" + includeConfigKey, ic,
 		"-" + rootKey, d5}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
 	o, err = readOptions()
 	if err != nil || o == nil ||
 		o.root != d5 ||
 		o.cachedir != cd4 ||
 		o.maxSearchResults != msr3 ||
+		o.runas != "" ||
 
 		o.address != ad2 ||
 		o.tlsKey != tk1 ||
@@ -723,14 +901,14 @@ func TestReadOptions(t *testing.T) {
 	// error
 	RemoveIfExistsF(t, ic)
 	EnsureDirF(t, ic)
-	os.Args = []string{"cmd",
+	os.Args = []string{"tasked", "cmd",
 		"-" + includeConfigKey, ic}
 	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
 	o, err = readOptions()
 	if err == nil {
 		t.Fail()
 	}
-	os.Args = []string{"cmd",
+	os.Args = []string{"tasked", "cmd",
 		"-" + maxSearchResultsKey, "not int"}
 	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
 	o, err = readOptions()
@@ -739,16 +917,9 @@ func TestReadOptions(t *testing.T) {
 	}
 
 	// command and args
-	os.Args = []string{"cmd", "subcmd", "arg0", "arg1"}
-	flag.CommandLine = flag.NewFlagSet("test", flag.ExitOnError)
+	os.Args = []string{"tasked", cmdServe, "arg0", "arg1"}
 	o, err = readOptions()
 	if err != nil {
-		t.Fail()
-	}
-	if o.command != "subcmd" {
-		t.Fail()
-	}
-	if o.args[0] != "arg0" || o.args[1] != "arg1" {
 		t.Fail()
 	}
 }

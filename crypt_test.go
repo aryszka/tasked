@@ -1,16 +1,27 @@
 package main
 
 import (
+	"bytes"
 	. "code.google.com/p/tasked/testing"
+	"crypto/aes"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"io"
 	"io/ioutil"
 	"net"
 	"path"
 	"testing"
 	"time"
 )
+
+var testError = errors.New("test error")
+
+type errorReader struct{}
+
+func (er *errorReader) Read(b []byte) (int, error) { return 0, testError }
 
 func TestSelfCert(t *testing.T) {
 	if !testLong {
@@ -24,7 +35,6 @@ func TestSelfCert(t *testing.T) {
 		notAfter = time.Unix(notAfter.Unix(), 0)
 		k, c, err := selfCert(host, cachedir)
 		if len(k) == 0 || len(c) == 0 || err != nil {
-			t.Log(err)
 			t.Fail()
 			return
 		}
@@ -79,9 +89,6 @@ func TestSelfCert(t *testing.T) {
 			ErrFatal(t, err)
 			c, err := ioutil.ReadFile(cfn)
 			ErrFatal(t, err)
-			t.Log(string(k))
-			t.Log(string(c))
-			t.Log("here")
 			testCert(c, k)
 		}
 	}
@@ -95,4 +102,23 @@ func TestSelfCert(t *testing.T) {
 	test(nil, cachedir)
 	test("host.domain", cachedir)
 	test(net.ParseIP("42.42.42.42"), cachedir)
+}
+
+func TestGenAes(t *testing.T) {
+	defer func(r io.Reader) { rand.Reader = r }(rand.Reader)
+	empty := make([]byte, aes.BlockSize)
+
+	key, iv, err := genAes()
+	if err != nil ||
+		bytes.Equal(key, empty) ||
+		bytes.Equal(iv, empty) ||
+		bytes.Equal(key, iv) {
+		t.Fail()
+	}
+
+	rand.Reader = new(errorReader)
+	_, _, err = genAes()
+	if err != testError {
+		t.Fail()
+	}
 }

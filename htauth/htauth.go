@@ -54,15 +54,11 @@ type filter struct {
 	cookieMaxAge int
 }
 
-func New(a Auth, o Options) (share.HttpFilter, error) {
-	if a == nil {
-		return nil, authNotSet
-	}
-	ha := filter{auth: a}
-	if o != nil {
-		ha.allowCookies = o.AllowCookies()
-	}
-	return &ha, nil
+func New(a Auth, o Options) share.HttpFilter {
+	ha := new(filter)
+	ha.auth = a
+	ha.allowCookies = o.AllowCookies()
+	return ha
 }
 
 func isAuthRequest(r *http.Request) (bool, error) {

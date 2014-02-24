@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/aes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -58,4 +59,16 @@ func selfCert(host interface{}, cachedir string) ([]byte, []byte, error) {
 		}
 	}
 	return key, cert, nil
+}
+
+func genAes() ([]byte, []byte, error) {
+	key := make([]byte, aes.BlockSize)
+	iv := make([]byte, aes.BlockSize)
+	if _, err := rand.Reader.Read(key); err != nil {
+		return nil, nil, err
+	}
+	if _, err := rand.Reader.Read(iv); err != nil {
+		return nil, nil, err
+	}
+	return key, iv, nil
 }

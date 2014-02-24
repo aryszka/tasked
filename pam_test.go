@@ -5,6 +5,11 @@ import (
 	tst "code.google.com/p/tasked/testing"
 	"flag"
 	"testing"
+	"path"
+	. "code.google.com/p/tasked/testing"
+	"io"
+	"crypto/rand"
+	"crypto/aes"
 )
 
 var testPam bool
@@ -20,44 +25,71 @@ func TestAuthPam(t *testing.T) {
 		t.Skip()
 	}
 
-	if nil != authPam(tst.Testuser, tst.Testpwd) {
+	if valid := authPam(tst.Testuser, tst.Testpwd); !valid {
 		t.Fail()
 	}
-	if nil == authPam(tst.Testuser+"x", tst.Testpwd) {
+	if valid := authPam(tst.Testuser+"x", tst.Testpwd); valid {
 		t.Fail()
 	}
-	if nil == authPam(tst.Testuser, tst.Testpwd+"x") {
+	if valid := authPam(tst.Testuser, tst.Testpwd+"x"); valid {
 		t.Fail()
 	}
-	if nil == authPam(tst.Testuser, "") {
+	if valid := authPam(tst.Testuser, ""); valid {
 		t.Fail()
 	}
-	if nil == authPam("", "") {
+	if valid := authPam("", ""); valid {
 		t.Fail()
 	}
 }
 
-func TestNewAuth(t *testing.T) {
-	/*
-		a, err := newAuth(nil)
-		if a == nil || err != nil {
-			t.Fail()
-		}
-		o := &options{}
-		kp := path.Join(tst.Testdir, "keyFile")
-		tst.RemoveIfExistsF(t, kp)
-		o.sec.aes.keyFile = kp
-		a, err = newAuth(o)
-		if err == nil {
-			t.Fail()
-		}
-		o = &options{}
-		ki := path.Join(tst.Testdir, "ivFile")
-		tst.RemoveIfExistsF(t, ki)
-		o.sec.aes.ivFile = ki
-		a, err = newAuth(o)
-		if err == nil {
-			t.Fail()
-		}
-	*/
+func TestMkauth(t *testing.T) {
+	defer func(r io.Reader) { rand.Reader = r }(rand.Reader)
+
+	// key read fail
+	o := new(options)
+	f := path.Join(Testdir, "file")
+	o.aesKeyFile = f
+	RemoveIfExistsF(t, f)
+	_, err := mkauth(o)
+	if err == nil {
+		t.Fail()
+	}
+
+	// iv read fail
+	o = new(options)
+	f = path.Join(Testdir, "file")
+	o.aesIvFile = f
+	RemoveIfExistsF(t, f)
+	_, err = mkauth(o)
+	if err == nil {
+		t.Fail()
+	}
+
+	// no key and iv, genAes fails
+	o = new(options)
+	rr := rand.Reader
+	rand.Reader = new(errorReader)
+	_, err = mkauth(o)
+	if err == nil {
+		t.Fail()
+	}
+	rand.Reader = rr
+
+	// no key and iv
+	o = new(options)
+	a, err := mkauth(o)
+	if a == nil || err != nil {
+		t.Fail()
+	}
+
+	// key and iv set
+	key := make([]byte, aes.BlockSize)
+	iv := make([]byte, aes.BlockSize)
+	o = new(options)
+	o.aesKey = string(key)
+	o.aesIv = string(iv)
+	a, err = mkauth(o)
+	if a == nil || err != nil {
+		t.Fail()
+	}
 }

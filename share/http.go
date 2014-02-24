@@ -243,11 +243,16 @@ func CheckQryCmd(w http.ResponseWriter, r *http.Request, allowed ...string) (str
 }
 
 func ReadJsonRequest(r *http.Request, ip interface{}, maxBody int64) error {
-	mr := &MaxReader{Reader: r.Body, Count: maxBody}
-	dec := json.NewDecoder(mr)
+	var rr io.Reader = r.Body
+	var mr *MaxReader
+	if maxBody > 0 {
+		mr = &MaxReader{Reader: rr, Count: maxBody}
+		rr = mr
+	}
+	dec := json.NewDecoder(rr)
 	dec.UseNumber()
 	err := dec.Decode(ip)
-	if err != io.EOF && mr.Count <= 0 {
+	if err != io.EOF && mr != nil && mr.Count <= 0 {
 		return RequestBodyTooLarge
 	}
 	if err != io.EOF && err != nil {

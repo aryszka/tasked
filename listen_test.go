@@ -79,7 +79,6 @@ func TestParseAddress(t *testing.T) {
 			(a.schema != schema(s) ||
 				a.val != v ||
 				a.port != port(p)) {
-			t.Log(addr, err, a)
 			t.Fail()
 		}
 	}
@@ -297,19 +296,16 @@ func TestListen(t *testing.T) {
 		defer CloseFatal(t, lb)
 		_, err = listen(new(testOptions))
 		if err == nil {
-			t.Log("here")
 			t.Fail()
 		}
 	}()
 
-	println("starting")
 	o = new(testOptions)
 	o.address = "https:"
 	o.key = []byte("invalid key")
 	func() {
 		_, err = listen(o)
 		if err == nil {
-			println("ever really here")
 			t.Fail()
 		}
 	}()
@@ -317,7 +313,6 @@ func TestListen(t *testing.T) {
 	func() {
 		l, err := listen(new(testOptions))
 		if err != nil {
-			t.Log(err)
 			t.Fail()
 			return
 		}
@@ -329,7 +324,6 @@ func TestListen(t *testing.T) {
 		o.address = "https:"
 		l, err := listen(o)
 		if err != nil {
-			t.Log(err)
 			t.Fail()
 			return
 		}

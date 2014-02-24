@@ -2,6 +2,7 @@ package main
 
 import (
 	"code.google.com/p/tasked/keyval"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -15,6 +16,7 @@ const (
 	envFilename    = "nletconf"
 	envAltFilename = "NLETCONF"
 
+	cmdHelp     = "help"
 	cmdServe    = "serve"
 	cmdOptions  = "options"
 	cmdHead     = "head"
@@ -28,20 +30,22 @@ const (
 	cmdDelete   = "delete"
 	cmdMkdir    = "mkdir"
 	cmdPost     = "post"
+	cmdSync     = "sync"
 
-	argKey           = "arg"
 	includeConfigKey = "include-config"
 
-	rootKey             = "root"
-	cachedirKey         = "cachedir"
-	maxSearchResultsKey = "max-search-results"
+	helpKey         = "help"
+	rootKey         = "root"
+	cachedirKey     = "cachedir"
+	allowCookiesKey = "allow-cookies"
+	runasKey        = "runas"
 
 	addressKey          = "address" // todo: document that address is a non-standard format
 	tlsKeyKey           = "tls-key"
 	tlsCertKey          = "tls-cert"
 	tlsKeyFileKey       = "tls-key-file"
 	tlsCertFileKey      = "tls-cert-file"
-	allowCookiesKey     = "allow-cookies"
+	maxSearchResultsKey = "max-search-results"
 	maxRequestBodyKey   = "max-request-body"
 	maxRequestHeaderKey = "max-request-header"
 	proxyKey            = "proxy"
@@ -64,8 +68,12 @@ const (
 )
 
 var (
-	sysConfig   = "/etc/nlet"
-	userHomeKey = "HOME"
+	sysConfig      = "/etc/nlet"
+	userHomeKey    = "HOME"
+	missingCommand = errors.New("missing command")
+	invalidCommand = errors.New("invalid command")
+	invalidArgs    = errors.New("invalid args")
+	onFlagError    = flag.ExitOnError
 )
 
 type flg struct {
@@ -92,18 +100,18 @@ func (f *flg) IsBoolFlag() bool {
 
 type options struct {
 	command string
-	args    []string
 
-	root             string
-	cachedir         string
-	maxSearchResults int
+	root         string
+	cachedir     string
+	allowCookies bool
+	runas        string
 
 	address          string
 	tlsKey           string
 	tlsCert          string
 	tlsKeyFile       string
 	tlsCertFile      string
-	allowCookies     bool
+	maxSearchResults int
 	maxRequestBody   int64
 	maxRequestHeader int64
 	proxy            string
@@ -124,20 +132,22 @@ func fieldOrFile(field string, fn string) ([]byte, error) {
 	if len(field) > 0 {
 		return []byte(field), nil
 	}
-	return ioutil.ReadFile(fn)
+	if len(fn) > 0 {
+		return ioutil.ReadFile(fn)
+	}
+	return nil, nil
 }
 
-func (o *options) Command() string { return o.command }
-func (o *options) Args() []string  { return o.args }
-
-func (o *options) Root() string          { return o.root }
-func (o *options) CacheDir() string      { return o.cachedir }
-func (o *options) MaxSearchResults() int { return o.maxSearchResults }
+func (o *options) Command() string    { return o.command }
+func (o *options) Root() string       { return o.root }
+func (o *options) Cachedir() string   { return o.cachedir }
+func (o *options) AllowCookies() bool { return o.allowCookies }
+func (o *options) Runas() string      { return o.runas }
 
 func (o *options) Address() string          { return o.address }
 func (o *options) TlsKey() ([]byte, error)  { return fieldOrFile(o.tlsKey, o.tlsKeyFile) }
 func (o *options) TlsCert() ([]byte, error) { return fieldOrFile(o.tlsCert, o.tlsCertFile) }
-func (o *options) AllowCookies() bool       { return o.allowCookies }
+func (o *options) MaxSearchResults() int    { return o.maxSearchResults }
 func (o *options) MaxRequestBody() int64    { return o.maxRequestBody }
 func (o *options) MaxRequestHeader() int64  { return o.maxRequestHeader }
 func (o *options) Proxy() string            { return o.proxy }
@@ -150,20 +160,54 @@ func (o *options) TokenValidity() int      { return o.tokenValidity }
 func (o *options) MaxUserProcesses() int   { return o.maxUserProcesses }
 func (o *options) ProcessIdleTime() int    { return o.processIdleTime }
 
-func parseFlags() []*keyval.Entry {
+func parseCommand() (string, error) {
+	if len(os.Args) < 2 {
+		return "", missingCommand
+	}
+	cmd := os.Args[1]
+	switch cmd {
+	case
+		cmdHelp,
+		cmdServe,
+		cmdOptions,
+		cmdHead,
+		cmdSearch,
+		cmdGet,
+		cmdProps,
+		cmdModprops,
+		cmdPut,
+		cmdCopy,
+		cmdRename,
+		cmdDelete,
+		cmdMkdir,
+		cmdPost,
+		cmdSync:
+	default:
+		return "", invalidCommand
+	}
+	return cmd, nil
+}
+
+func printUsage() {
+	fmt.Fprint(os.Stderr, usage)
+}
+
+func parseFlags() ([]*keyval.Entry, []string) {
 	flags := []*flg{
 		&flg{key: includeConfigKey},
 
+		&flg{key: helpKey, isBool: true},
 		&flg{key: rootKey},
 		&flg{key: cachedirKey},
-		&flg{key: maxSearchResultsKey},
+		&flg{key: allowCookiesKey, isBool: true},
+		&flg{key: runasKey},
 
 		&flg{key: addressKey},
 		&flg{key: tlsKeyKey},
 		&flg{key: tlsCertKey},
 		&flg{key: tlsKeyFileKey},
 		&flg{key: tlsCertFileKey},
-		&flg{key: allowCookiesKey, isBool: true},
+		&flg{key: maxSearchResultsKey},
 		&flg{key: maxRequestBodyKey},
 		&flg{key: maxRequestHeaderKey},
 		&flg{key: proxyKey},
@@ -179,15 +223,13 @@ func parseFlags() []*keyval.Entry {
 		&flg{key: maxUserProcessesKey},
 		&flg{key: processIdleTimeKey}}
 
+	fs := flag.NewFlagSet("tasked", onFlagError)
+	fs.Usage = printUsage
 	for _, f := range flags {
-		flag.Var(f, f.key, "")
+		fs.Var(f, f.key, "")
 	}
-	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-	flag.Parse()
+	fs.Parse(os.Args[2:])
 	var e []*keyval.Entry
-	for _, arg := range flag.Args() {
-		e = append(e, &keyval.Entry{Key: argKey, Val: arg})
-	}
 	for _, f := range flags {
 		if f.val == nil {
 			continue
@@ -195,7 +237,32 @@ func parseFlags() []*keyval.Entry {
 		e = append(e, &keyval.Entry{Key: f.key, Val: *f.val})
 	}
 
-	return e
+	return e, fs.Args()
+}
+
+func hasHelpFlag(e []*keyval.Entry) bool {
+	for _, ei := range e {
+		if ei.Key == helpKey {
+			return true
+		}
+	}
+	return false
+}
+
+func getIncludes(flags []*keyval.Entry) []string {
+	includes := []string{
+		sysConfig,
+		path.Join(os.Getenv(userHomeKey), userConfigBase),
+		os.Getenv(envAltFilename),
+		os.Getenv(envFilename)}
+	for _, ei := range flags {
+		if ei.Key != includeConfigKey {
+			continue
+		}
+		includes = append(includes, string(ei.Val))
+		break
+	}
+	return includes
 }
 
 func applyDefaults(o *options) {
@@ -205,29 +272,39 @@ func applyDefaults(o *options) {
 	o.processIdleTime = defaultProcessIdleTime
 }
 
+func applyFreeArgs(o *options, args []string) error {
+	switch o.command {
+	case cmdHelp:
+	case cmdServe:
+		if len(args) > 2 {
+			return invalidArgs
+		}
+		if len(args) > 0 {
+			o.root = args[0]
+		}
+		if len(args) == 2 {
+			o.address = args[1]
+		}
+	}
+	return nil
+}
+
 func parseOptions(o *options, e []*keyval.Entry) error {
 	for _, ei := range e {
 		switch ei.Key {
-		// command
-		case argKey:
-			switch {
-			case o.command == "":
-				o.command = ei.Val
-			default:
-				o.args = append(o.args, ei.Val)
-			}
-
 		// general
 		case rootKey:
 			o.root = ei.Val
 		case cachedirKey:
 			o.cachedir = ei.Val
-		case maxSearchResultsKey:
-			v, err := strconv.ParseInt(ei.Val, 0, 32)
+		case allowCookiesKey:
+			v, err := strconv.ParseBool(ei.Val)
 			if err != nil {
 				return err
 			}
-			o.maxSearchResults = int(v)
+			o.allowCookies = v
+		case runasKey:
+			o.runas = ei.Val
 
 		// http
 		case addressKey:
@@ -240,12 +317,12 @@ func parseOptions(o *options, e []*keyval.Entry) error {
 			o.tlsKeyFile = ei.Val
 		case tlsCertFileKey:
 			o.tlsCertFile = ei.Val
-		case allowCookiesKey:
-			v, err := strconv.ParseBool(ei.Val)
+		case maxSearchResultsKey:
+			v, err := strconv.ParseInt(ei.Val, 0, 32)
 			if err != nil {
 				return err
 			}
-			o.allowCookies = v
+			o.maxSearchResults = int(v)
 		case maxRequestBodyKey:
 			v, err := strconv.ParseInt(ei.Val, 0, 64)
 			if err != nil {
@@ -304,26 +381,37 @@ func parseOptions(o *options, e []*keyval.Entry) error {
 }
 
 func readOptions() (*options, error) {
-	flags := parseFlags()
-	includes := []string{
-		sysConfig,
-		path.Join(os.Getenv(userHomeKey), userConfigBase),
-		os.Getenv(envAltFilename),
-		os.Getenv(envFilename)}
-	for _, ei := range flags {
-		if ei.Key != includeConfigKey {
-			continue
-		}
-		includes = append(includes, string(ei.Val))
-		break
+	cmd, err := parseCommand()
+	if err != nil || cmd == cmdHelp {
+		printUsage()
+		return nil, err
 	}
+
+	flags, args := parseFlags()
+	if hasHelpFlag(flags) {
+		printUsage()
+		return nil, nil
+	}
+
+	includes := getIncludes(flags)
 	e, err := keyval.Parse(includes, includeConfigKey)
 	if err != nil {
 		return nil, err
 	}
 	e = append(e, flags...)
+
 	o := new(options)
+	o.command = cmd
 	applyDefaults(o)
+	err = applyFreeArgs(o, args)
+	if err != nil {
+		printUsage()
+		return nil, err
+	}
 	err = parseOptions(o, e)
-	return o, err
+	if err != nil {
+		printUsage()
+		return nil, err
+	}
+	return o, nil
 }

@@ -21,13 +21,11 @@ import (
 )
 
 const (
-	defaultMaxRequestBody   = 1 << 30
-	modeMask                = os.FileMode(1)<<9 - 1
-	defaultMaxSearchResults = 30
-	searchQueryMax          = "max"
-	searchQueryName         = "name"
-	searchQueryContent      = "content"
-	copyRenameToKey         = "to"
+	modeMask           = os.FileMode(1)<<9 - 1
+	searchQueryMax     = "max"
+	searchQueryName    = "name"
+	searchQueryContent = "content"
+	copyRenameToKey    = "to"
 )
 
 type fileInfo struct {
@@ -504,9 +502,14 @@ func (h *handler) putf(w http.ResponseWriter, r *http.Request) {
 	if !share.CheckOsError(w, err) {
 		return
 	}
-	mr := &share.MaxReader{Reader: r.Body, Count: h.maxRequestBody}
-	_, err = io.Copy(f, mr)
-	if share.CheckHandle(w, err == io.EOF || mr.Count > 0, http.StatusRequestEntityTooLarge) {
+	var rr io.Reader = r.Body
+	var mr *share.MaxReader
+	if h.maxRequestBody > 0 {
+		mr = &share.MaxReader{Reader: rr, Count: h.maxRequestBody}
+		rr = mr
+	}
+	_, err = io.Copy(f, rr)
+	if share.CheckHandle(w, err == io.EOF || mr == nil || mr.Count > 0, http.StatusRequestEntityTooLarge) {
 		share.CheckOsError(w, err)
 	}
 }
@@ -586,27 +589,12 @@ func queryNoCmd(w http.ResponseWriter, r *http.Request, f queryHandler) {
 	}
 }
 
-func New(o Options) (http.Handler, error) {
-	var h handler
-	if o != nil {
-		h.dn = o.Root()
-		h.maxRequestBody = o.MaxRequestBody()
-		h.maxSearchResults = o.MaxSearchResults()
-	}
-	if len(h.dn) == 0 {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		h.dn = wd
-	}
-	if h.maxRequestBody <= 0 {
-		h.maxRequestBody = defaultMaxRequestBody
-	}
-	if h.maxSearchResults <= 0 {
-		h.maxSearchResults = defaultMaxSearchResults
-	}
-	return &h, nil
+func New(o Options) http.Handler {
+	h := new(handler)
+	h.dn = o.Root()
+	h.maxRequestBody = o.MaxRequestBody()
+	h.maxSearchResults = o.MaxSearchResults()
+	return h
 }
 
 func (h *handler) options(w http.ResponseWriter, r *http.Request)  { noCmd(w, r, nil) }

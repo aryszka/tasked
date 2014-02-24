@@ -46,19 +46,15 @@ func makeRandom(l int) []byte {
 
 func makeKey() []byte { return makeRandom(aes.BlockSize) }
 
-func checkFunc(u, p string) error {
+func checkFunc(u, p string) bool {
 	if len(u) > 0 && u == p {
-		return nil
+		return true
 	}
-	return errors.New("Authentication failed.")
+	return false
 }
 
 func defaultInstance() *It {
-	i, err := New(PasswordCheckerFunc(checkFunc), &testConfig{makeKey(), makeKey(), 18})
-	if err != nil {
-		panic(err)
-	}
-	return i
+	return New(PasswordCheckerFunc(checkFunc), &testConfig{makeKey(), makeKey(), 18})
 }
 
 func (a *It) durNoRefresh() time.Duration {
@@ -160,31 +156,28 @@ func TestEncryption(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	_, err := New(nil, nil)
-	if err == nil {
-		t.Fail()
-	}
-
-	testError := errors.New("test error")
-	pcf := PasswordCheckerFunc(func(u, p string) error {
-		return testError
+	pcf := PasswordCheckerFunc(func(u, p string) bool {
+		return false
 	})
-	a, err := New(pcf, nil)
-	if err != nil || a == nil ||
-		a.checker.Check("", "") != testError ||
+	a := New(pcf, new(testConfig))
+	if a == nil ||
 		len(a.key) != aes.BlockSize || len(a.iv) != aes.BlockSize ||
 		a.tokenValidity != 0 || a.renewThreshold != 0 {
 		t.Fail()
 	}
+	valid := a.checker.Check("", "")
+	if valid {
+		t.Fail()
+	}
 
 	iv := make([]byte, 1.5*aes.BlockSize)
-	_, err = rand.Read(iv)
+	_, err := rand.Read(iv)
 	ErrFatal(t, err)
-	a, err = New(pcf, &testConfig{
+	a = New(pcf, &testConfig{
 		aesKey:        []byte("012"),
 		aesIv:         iv,
 		tokenValidity: 30})
-	if err != nil || a == nil ||
+	if a == nil ||
 		len(a.key) != aes.BlockSize ||
 		len(a.iv) != aes.BlockSize ||
 		a.tokenValidity != 30*time.Second ||

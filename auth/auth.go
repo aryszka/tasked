@@ -18,19 +18,20 @@ const renewThresholdRate = 0.1
 var (
 	invalidToken      = errors.New("Invalid token.")
 	noPasswordChecker = errors.New("PasswordChecker must be defined.")
+	authFailed        = errors.New("Authentication failed.")
 )
 
 // Package auth uses implementations of PasswordChecker to verify the validity of a username and password pair.
 type PasswordChecker interface {
-	// Returns nil if username and password are valid credentials and no errors occur during verification.
-	Check(username, password string) error
+	// Returns true, if username and password are valid credentials and no errors occur during verification.
+	Check(username, password string) bool
 }
 
 // Wrapper for standalone function implementations of PasswordChecker.
-type PasswordCheckerFunc func(string, string) error
+type PasswordCheckerFunc func(string, string) bool
 
 // Calls f.
-func (f PasswordCheckerFunc) Check(username, password string) error {
+func (f PasswordCheckerFunc) Check(username, password string) bool {
 	return f(username, password)
 }
 
@@ -46,13 +47,11 @@ type It struct {
 	// aes key and iv: valid during the time the application is running
 	// update now possible only through restarting the app
 	// (if want to update during run time, will need to take care about the previously issued keys, too)
-	key []byte
-	iv  []byte
-
+	key            []byte
+	iv             []byte
 	tokenValidity  time.Duration
 	renewThreshold time.Duration
-
-	checker PasswordChecker
+	checker        PasswordChecker
 }
 
 // crypting with AES CTR
@@ -93,30 +92,27 @@ func (a *It) encryptToken(c int64, u string) ([]byte, error) {
 // Initializes an authentication instance by setting the key and iv for AES, and setting the token expiration
 // interval. It expects an implementation of PasswordChecker, which will be used to check user credentials when
 // AuthPwd is called.
-func New(c PasswordChecker, o Options) (*It, error) {
-	if c == nil {
-		return nil, noPasswordChecker
-	}
+func New(c PasswordChecker, o Options) *It {
 	a := new(It)
 	a.checker = c
 	a.key = make([]byte, aes.BlockSize)
 	a.iv = make([]byte, aes.BlockSize)
 	if o == nil {
-		return a, nil
+		return a
 	}
 	copy(a.key, o.AesKey())
 	copy(a.iv, o.AesIv())
 	a.tokenValidity = time.Duration(o.TokenValidity()) * time.Second
 	a.renewThreshold = time.Duration(float64(a.tokenValidity) * renewThresholdRate)
-	return a, nil
+	return a
 }
 
 // Checks if the provided username and password are correct. If yes, an authentication token is returned,
 // otherwise an error.
 func (a *It) AuthPwd(user, pwd string) ([]byte, error) {
-	err := a.checker.Check(user, pwd)
-	if err != nil {
-		return nil, err
+	valid := a.checker.Check(user, pwd)
+	if !valid {
+		return nil, authFailed
 	}
 	c := time.Now().Unix()
 	return a.encryptToken(c, user)

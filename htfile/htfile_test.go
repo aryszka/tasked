@@ -23,6 +23,8 @@ import (
 	"time"
 )
 
+const testMaxRequestBody = 1 << 30
+
 type testOptions struct {
 	root             string
 	maxRequestBody   int64
@@ -205,12 +207,6 @@ func verifyHeader(expect, have map[string][]string) bool {
 		}
 	}
 	return true
-}
-
-func newHandler(t *testing.T, o Options) http.Handler {
-	h, err := New(o)
-	tst.ErrFatal(t, err)
-	return h
 }
 
 func TestToPropertyMap(t *testing.T) {
@@ -887,7 +883,7 @@ func TestGetQryExpression(t *testing.T) {
 }
 
 func TestGetPath(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	p, err := ht.getPath("..")
 	if err == nil {
 		t.Fail()
@@ -900,7 +896,7 @@ func TestGetPath(t *testing.T) {
 
 func TestSearchf(t *testing.T) {
 	var queryString url.Values
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn, maxSearchResults: 30}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.searchf(w, r, queryString)
 	}
@@ -939,9 +935,9 @@ func TestSearchf(t *testing.T) {
 		tst.WithNewFileF(t, pi, nil)
 	}
 	queryString = make(url.Values)
-	checkLen(defaultMaxSearchResults)
+	checkLen(30)
 	queryString.Set("max", "42")
-	checkLen(defaultMaxSearchResults)
+	checkLen(30)
 	queryString.Set("max", "3")
 	checkLen(3)
 
@@ -1056,7 +1052,7 @@ func TestSearchNotRoot(t *testing.T) {
 	}
 
 	var queryString url.Values
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.searchf(w, r, queryString)
 	}
@@ -1110,7 +1106,7 @@ func TestSearchNotRoot(t *testing.T) {
 }
 
 func TestPropsf(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.propsf(w, r)
 	}
@@ -1204,7 +1200,7 @@ func TestPropsfRoot(t *testing.T) {
 	p := path.Join(dn, fn)
 	url := tst.S.URL + "/" + fn
 	tst.WithNewFileF(t, p, nil)
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.propsf(w, r)
 	}
@@ -1270,23 +1266,23 @@ func TestModpropsf(t *testing.T) {
 	fn := "some-file"
 	p := path.Join(dn, fn)
 	tst.WithNewFileF(t, p, nil)
-	st := &testOptions{root: dn, maxRequestBody: defaultMaxRequestBody}
-	ht := newHandler(t, st).(*handler)
+	st := &testOptions{root: dn, maxRequestBody: testMaxRequestBody}
+	ht := New(st).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.modpropsf(w, r)
 	}
 
 	// max req length
 	st.maxRequestBody = 8
-	ht = newHandler(t, st).(*handler)
+	ht = New(st).(*handler)
 	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"something\": \"long enough\"}"),
 		func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusRequestEntityTooLarge {
 				t.Fail()
 			}
 		})
-	st.maxRequestBody = defaultMaxRequestBody
-	ht = newHandler(t, st).(*handler)
+	st.maxRequestBody = testMaxRequestBody
+	ht = New(st).(*handler)
 
 	// json number
 	tst.Htreqx(t, "MODPROPS", tst.S.URL, tst.NewByteReaderString("{\"mode\":  \"not a number\"}"),
@@ -1434,7 +1430,7 @@ func TestModpropsRoot(t *testing.T) {
 	tst.ErrFatal(t, err)
 	err = os.Chmod(tst.Testdir, os.ModePerm)
 	tst.ErrFatal(t, err)
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.modpropsf(w, r)
 	}
@@ -1493,7 +1489,7 @@ func TestGetDir(t *testing.T) {
 	p := path.Join(dn, fn)
 	url := tst.S.URL + "/" + fn
 	var d *os.File
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.getDir(w, r, d)
 	}
@@ -1627,7 +1623,7 @@ func TestGetDirRoot(t *testing.T) {
 	tst.ErrFatal(t, err)
 	url := tst.S.URL + "/" + fn
 	var d *os.File
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.getDir(w, r, d)
 	}
@@ -1709,7 +1705,7 @@ func TestGetFile(t *testing.T) {
 		err  error
 		html = []byte("<html></html>")
 	)
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.getFile(w, r, f, fi)
 	}
@@ -1828,7 +1824,7 @@ func TestGetFile(t *testing.T) {
 }
 
 func TestPutf(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn, maxRequestBody: defaultMaxRequestBody}).(*handler)
+	ht := New(&testOptions{root: dn, maxRequestBody: testMaxRequestBody}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.putf(w, r)
 	}
@@ -1944,7 +1940,7 @@ func TestPutf(t *testing.T) {
 
 	// max the body
 	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
-		ht = newHandler(t, &testOptions{root: dn, maxRequestBody: 8}).(*handler)
+		ht = New(&testOptions{root: dn, maxRequestBody: 8}).(*handler)
 		htr(t, "PUT", tst.S.URL+"/file", io.LimitReader(rand.Reader, 16), func(rsp *http.Response) {
 			if rsp.StatusCode != http.StatusRequestEntityTooLarge {
 				t.Fail()
@@ -1960,7 +1956,7 @@ func TestPutfNotRoot(t *testing.T) {
 		t.Skip()
 	}
 
-	ht := newHandler(t, &testOptions{root: dn, maxRequestBody: defaultMaxRequestBody}).(*handler)
+	ht := New(&testOptions{root: dn, maxRequestBody: testMaxRequestBody}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.putf(w, r)
 	}
@@ -2011,7 +2007,7 @@ func TestCopyRename(t *testing.T) {
 		qry      url.Values
 		f        = func(_, _ string) error { return nil }
 	)
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.copyRename(w, r, qry, multiple, f)
 	}
@@ -2091,7 +2087,7 @@ func TestCopyf(t *testing.T) {
 		fn0 string
 		fn1 string
 	)
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.copyf(w, r, qry)
 	}
@@ -2175,7 +2171,7 @@ func TestRenamef(t *testing.T) {
 	)
 	dir := path.Join(dn, "rename")
 	tst.EnsureDirF(t, dir)
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.renamef(w, r, qry)
 	}
@@ -2243,7 +2239,7 @@ func TestRenamefNotRoot(t *testing.T) {
 	}
 
 	var qry url.Values
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.renamef(w, r, qry)
 	}
@@ -2304,7 +2300,7 @@ func TestRenamefNotRoot(t *testing.T) {
 }
 
 func TestDeletef(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.deletef(w, r)
 	}
@@ -2345,7 +2341,7 @@ func TestDeletefNotRoot(t *testing.T) {
 		t.Skip()
 	}
 
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.deletef(w, r)
 	}
@@ -2370,7 +2366,7 @@ func TestDeletefNotRoot(t *testing.T) {
 }
 
 func TestMkdirf(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.mkdirf(w, r)
 	}
@@ -2422,7 +2418,7 @@ func TestMkdirfNotRoot(t *testing.T) {
 		t.Skip()
 	}
 
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn}).(*handler)
 	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
 		ht.mkdirf(w, r)
 	}
@@ -2536,25 +2532,16 @@ func TestQueryNoCmd(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	wd, err := os.Getwd()
-	tst.ErrFatal(t, err)
-	h, err := New(nil)
-	if err != nil {
-		t.Fail()
-	}
+	h := New(&testOptions{root: dn})
 	ht := h.(*handler)
-	if ht.dn != wd ||
-		ht.maxRequestBody != defaultMaxRequestBody ||
-		ht.maxSearchResults != defaultMaxSearchResults {
+	if ht.dn != dn ||
+		ht.maxRequestBody != 0 || ht.maxSearchResults != 0 {
 		t.Fail()
 	}
-	h, err = New(&testOptions{
+	h = New(&testOptions{
 		root:             dn,
 		maxRequestBody:   42,
 		maxSearchResults: 1764})
-	if err != nil {
-		t.Fail()
-	}
 	ht = h.(*handler)
 	if ht.dn != dn ||
 		ht.maxRequestBody != 42 ||
@@ -2564,7 +2551,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestOptionsHandler(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 	tst.Htreqx(t, "OPTIONS", tst.S.URL, nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusOK ||
@@ -2575,7 +2562,7 @@ func TestOptionsHandler(t *testing.T) {
 }
 
 func TestProps(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 	fn := "some-file"
 	p := path.Join(dn, fn)
@@ -2593,7 +2580,7 @@ func TestProps(t *testing.T) {
 }
 
 func TestModprops(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 	fn := "some-file"
 	p := path.Join(dn, fn)
@@ -2616,7 +2603,7 @@ func TestModprops(t *testing.T) {
 }
 
 func TestPut(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// invalid command
@@ -2645,7 +2632,7 @@ func TestPut(t *testing.T) {
 }
 
 func TestSearch(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn}).(*handler)
+	ht := New(&testOptions{root: dn, maxSearchResults: 30}).(*handler)
 	tst.Thnd.Sh = ht.ServeHTTP
 	tst.Htreqx(t, "SEARCH", tst.S.URL+"?cmd=search", nil, func(rsp *http.Response) {
 		if rsp.StatusCode != http.StatusBadRequest {
@@ -2671,7 +2658,7 @@ func TestSearch(t *testing.T) {
 }
 
 func TestCopy(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// invalid query
@@ -2690,7 +2677,7 @@ func TestCopy(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// cmd can be props or search only
@@ -2763,7 +2750,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestPostHandler(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 
 	// invalid query
@@ -2878,7 +2865,7 @@ func TestPostHandler(t *testing.T) {
 }
 
 func TestNotSupported(t *testing.T) {
-	ht := newHandler(t, &testOptions{root: dn})
+	ht := New(&testOptions{root: dn})
 	tst.Thnd.Sh = ht.ServeHTTP
 	test := func(method string) {
 		tst.Htreqx(t, method, tst.S.URL, nil, func(rsp *http.Response) {
