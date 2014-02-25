@@ -1,9 +1,7 @@
 package main
 
 import (
-	"code.google.com/p/tasked/share"
 	tst "code.google.com/p/tasked/testing"
-	"flag"
 	"testing"
 	"path"
 	. "code.google.com/p/tasked/testing"
@@ -12,16 +10,8 @@ import (
 	"crypto/aes"
 )
 
-var testPam bool
-
-func init() {
-	tp := flag.Bool("test.pam", false, "")
-	flag.Parse()
-	testPam = *tp
-}
-
 func TestAuthPam(t *testing.T) {
-	if !share.IsRoot || !testPam {
+	if !IsRoot || !testLong {
 		t.Skip()
 	}
 

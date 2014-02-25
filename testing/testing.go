@@ -15,6 +15,8 @@ import (
 	"io"
 	"bytes"
 	"time"
+	"syscall"
+	"os/user"
 )
 
 const (
@@ -105,6 +107,7 @@ var (
 	S            *httptest.Server
 	Sx           *httptest.Server
 	Mx           = new(sync.Mutex)
+	IsRoot bool
 )
 
 func initTestdir() {
@@ -148,6 +151,12 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	syscall.Umask(0077)
+	usr, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	IsRoot = usr.Uid == "0"
 }
 
 func envdef(key, dflt string) string {

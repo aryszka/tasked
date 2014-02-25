@@ -107,7 +107,6 @@ func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, err
 		return nil, err
 	}
 	if len(tlsKey) == 0 && len(tlsCert) == 0 {
-		println("why 0")
 		var host interface{}
 		if len(a.val) > 0 {
 			ip := net.ParseIP(a.val)
@@ -133,10 +132,8 @@ func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, err
 			return nil, err
 		}
 	}
-	println("so actually here")
 	cert, err := tls.X509KeyPair(tlsCert, tlsKey)
 	if err != nil {
-		println("should come here")
 		return nil, err
 	}
 	return tls.NewListener(l, &tls.Config{
@@ -156,7 +153,6 @@ func listen(o listenerOptions) (net.Listener, error) {
 	}
 	tl, err := listenTls(l, addr, o)
 	if err != nil {
-		println("this error is the one")
 		defer Doretlog42(l.Close)
 	}
 	return tl, err

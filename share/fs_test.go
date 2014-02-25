@@ -123,7 +123,7 @@ func TestCheckPath(t *testing.T) {
 }
 
 func TestCheckPathNotRoot(t *testing.T) {
-	if IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 

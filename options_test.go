@@ -267,7 +267,6 @@ func TestApplyFreeArgs(t *testing.T) {
 	o.command = cmdServe
 	err = applyFreeArgs(o, []string{"some0", "some1"})
 	if err != nil || o.root != "some0" || o.address != "some1" {
-		t.Log("here", err, o.root, o.address)
 		t.Fail()
 	}
 
@@ -555,7 +554,6 @@ func TestReadOptions(t *testing.T) {
 		o.tokenValidity != defaultTokenValidity ||
 		o.maxUserProcesses != 0 ||
 		o.processIdleTime != defaultProcessIdleTime {
-		t.Log("here", err)
 		t.Fail()
 	}
 

@@ -1,5 +1,7 @@
 package htfile
 
+// todo: create permission related tests externally
+
 import (
 	"bytes"
 	"code.google.com/p/tasked/share"
@@ -7,7 +9,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -37,20 +38,9 @@ func (ts *testOptions) MaxSearchResults() int { return ts.maxSearchResults }
 
 var (
 	dn           string
-	propsRoot    bool
-	modpropsRoot bool
-	getDirRoot   bool
 )
 
 func init() {
-	tpr := flag.Bool("test.propsroot", false, "")
-	tmpr := flag.Bool("test.modpropsroot", false, "")
-	tgdr := flag.Bool("test.getdirroot", false, "")
-	flag.Parse()
-	propsRoot = *tpr
-	modpropsRoot = *tmpr
-	getDirRoot = *tgdr
-
 	dn = path.Join(tst.Testdir, "http")
 	err := share.EnsureDir(dn)
 	if err != nil {
@@ -353,7 +343,7 @@ func TestIsOwner(t *testing.T) {
 }
 
 func TestIsOwnerNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -376,7 +366,7 @@ func TestIsOwnerNotRoot(t *testing.T) {
 }
 
 func TestIsOwnerRoot(t *testing.T) {
-	if !share.IsRoot {
+	if !tst.IsRoot {
 		t.Skip()
 	}
 
@@ -635,7 +625,7 @@ func TestSearchFiles(t *testing.T) {
 }
 
 func TestSearchFilesNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -726,7 +716,7 @@ func TestCopyTree(t *testing.T) {
 }
 
 func TestCopyTreeNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -1047,7 +1037,7 @@ func TestSearchf(t *testing.T) {
 }
 
 func TestSearchNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -1177,86 +1167,6 @@ func TestPropsf(t *testing.T) {
 		js, err := ioutil.ReadAll(rsp.Body)
 		tst.ErrFatal(t, err)
 		if len(js) != 0 {
-			t.Fail()
-		}
-	})
-}
-
-func TestPropsfRoot(t *testing.T) {
-	// Tests using Setuid cannot be run together until they're replaced by Seteuid
-	if !share.IsRoot || !propsRoot {
-		t.Skip()
-	}
-
-	t.Parallel()
-	tst.Mx.Lock()
-	defer tst.Mx.Unlock()
-
-	err := os.Chmod(tst.Testdir, 0777)
-	tst.ErrFatal(t, err)
-	err = os.Chmod(dn, 0777)
-	tst.ErrFatal(t, err)
-	fn := "some-file-uid"
-	p := path.Join(dn, fn)
-	url := tst.S.URL + "/" + fn
-	tst.WithNewFileF(t, p, nil)
-	ht := New(&testOptions{root: dn}).(*handler)
-	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
-		ht.propsf(w, r)
-	}
-
-	// uid := syscall.Getuid()
-	usr, err := user.Lookup(tst.Testuser)
-	tst.ErrFatal(t, err)
-	tuid, err := strconv.Atoi(usr.Uid)
-	tst.ErrFatal(t, err)
-	err = syscall.Setuid(tuid)
-	tst.ErrFatal(t, err)
-
-	// makes no sense at the moment
-	// defer func() {
-	// 	err = syscall.Setuid(uid)
-	// 	tst.ErrFatal(t, err)
-	// }()
-
-	fiVerify, err := os.Stat(p)
-	tst.ErrFatal(t, err)
-	prVerify := toPropertyMap(fiVerify, false)
-	jsVerify, err := json.Marshal(prVerify)
-	tst.ErrFatal(t, err)
-	tst.Htreqx(t, "PROPS", url, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		clen, err := strconv.Atoi(rsp.Header.Get(share.HeaderContentLength))
-		tst.ErrFatal(t, err)
-		if len(jsVerify) != clen {
-			t.Fail()
-		}
-		js, err := ioutil.ReadAll(rsp.Body)
-		tst.ErrFatal(t, err)
-		if !bytes.Equal(js, jsVerify) {
-			t.Fail()
-		}
-		var pr map[string]interface{}
-		err = json.Unmarshal(js, &pr)
-		tst.ErrFatal(t, err)
-		if !convert64(pr, "modTime") || !convert64(pr, "size") {
-			t.Fail()
-		}
-		if !compareProperties(pr, prVerify) {
-			t.Fail()
-		}
-		_, ok := pr["mode"]
-		if ok {
-			t.Fail()
-		}
-		_, ok = pr["owner"]
-		if ok {
-			t.Fail()
-		}
-		_, ok = pr["group"]
-		if ok {
 			t.Fail()
 		}
 	})
@@ -1409,81 +1319,6 @@ func TestModpropsf(t *testing.T) {
 	f(tst.Htrex)
 }
 
-func TestModpropsRoot(t *testing.T) {
-	// Tests using Setuid cannot be run together until they're replaced by Seteuid
-	if !share.IsRoot || !modpropsRoot {
-		t.Skip()
-	}
-
-	t.Parallel()
-	tst.Mx.Lock()
-	defer tst.Mx.Unlock()
-
-	fn := "some-file-uid-mod"
-	p := path.Join(dn, fn)
-	url := tst.S.URL + "/" + fn
-
-	usr, err := user.Lookup(tst.Testuser)
-	tst.ErrFatal(t, err)
-
-	err = os.Chmod(dn, os.ModePerm)
-	tst.ErrFatal(t, err)
-	err = os.Chmod(tst.Testdir, os.ModePerm)
-	tst.ErrFatal(t, err)
-	ht := New(&testOptions{root: dn}).(*handler)
-	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
-		ht.modpropsf(w, r)
-	}
-
-	// chown
-	f := func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
-		tst.WithNewFileF(t, p, nil)
-		htr(t, "MODPROPS", url, bytes.NewBufferString(fmt.Sprintf("{\"owner\": \"%s\"}", tst.Testuser)),
-			func(rsp *http.Response) {
-				if rsp.StatusCode != http.StatusOK {
-					t.Fail()
-				}
-				fi, err := os.Lstat(p)
-				tst.ErrFatal(t, err)
-				sstat, ok := fi.Sys().(*syscall.Stat_t)
-				if !ok {
-					t.Fatal()
-				}
-				if strconv.Itoa(int(sstat.Uid)) != usr.Uid {
-					t.Fail()
-				}
-			})
-	}
-	f(tst.Htreq)
-	f(tst.Htrex)
-
-	// uid := syscall.Getuid()
-	f = func(htr func(tst.Fataler, string, string, io.Reader, func(rsp *http.Response))) {
-		tst.WithNewFileF(t, p, nil)
-		err = os.Chmod(p, os.ModePerm)
-		tst.ErrFatal(t, err)
-		tuid, err := strconv.Atoi(usr.Uid)
-		tst.ErrFatal(t, err)
-		err = syscall.Setuid(tuid)
-		tst.ErrFatal(t, err)
-
-		htr(t, "MODPROPS", url,
-			bytes.NewBufferString(fmt.Sprintf("{\"mode\": %d}", 0744)),
-			func(rsp *http.Response) {
-				if rsp.StatusCode != http.StatusNotFound {
-					t.Fail()
-				}
-				fi, err := os.Lstat(p)
-				tst.ErrFatal(t, err)
-				if fi.Mode() != os.ModePerm {
-					t.Fail()
-				}
-			})
-	}
-	f(tst.Htreq)
-	f(tst.Htrex)
-}
-
 func TestGetDir(t *testing.T) {
 	fn := "some-dir"
 	p := path.Join(dn, fn)
@@ -1597,103 +1432,6 @@ func TestGetDir(t *testing.T) {
 		tst.ErrFatal(t, err)
 		if len(b) > 0 {
 			t.Fail()
-		}
-	})
-}
-
-func TestGetDirRoot(t *testing.T) {
-	// Tests using Setuid cannot be run together until they're replaced by Seteuid
-	if !share.IsRoot || !getDirRoot {
-		t.Skip()
-	}
-
-	t.Parallel()
-	tst.Mx.Lock()
-	defer tst.Mx.Unlock()
-
-	err := os.Chmod(tst.Testdir, 0777)
-	tst.ErrFatal(t, err)
-	err = os.Chmod(dn, 0777)
-	tst.ErrFatal(t, err)
-
-	fn := "some-dir"
-	p := path.Join(dn, fn)
-	tst.EnsureDirF(t, p)
-	err = os.Chmod(p, 0777)
-	tst.ErrFatal(t, err)
-	url := tst.S.URL + "/" + fn
-	var d *os.File
-	ht := New(&testOptions{root: dn}).(*handler)
-	tst.Thnd.Sh = func(w http.ResponseWriter, r *http.Request) {
-		ht.getDir(w, r, d)
-	}
-	mkfile := func(n string, c []byte) {
-		tst.WithNewFileF(t, path.Join(p, n), func(f *os.File) error {
-			n, err := f.Write(c)
-			if n != len(c) {
-				return errors.New("Failed to write all bytes.")
-			}
-			return err
-		})
-	}
-
-	mkfile("some0", nil)
-	mkfile("some1", []byte{0})
-	mkfile("some2", []byte{0, 0})
-
-	// uid := syscall.Getuid()
-	usr, err := user.Lookup(tst.Testuser)
-	tst.ErrFatal(t, err)
-	tuid, err := strconv.Atoi(usr.Uid)
-	tst.ErrFatal(t, err)
-	tgid, err := strconv.Atoi(usr.Gid)
-	tst.ErrFatal(t, err)
-	err = os.Chown(path.Join(p, "some1"), tuid, tgid)
-	tst.ErrFatal(t, err)
-	err = syscall.Setuid(tuid)
-	tst.ErrFatal(t, err)
-
-	// makes no sense at the moment
-	// defer func() {
-	// 	err = syscall.Setuid(uid)
-	// 	tst.ErrFatal(t, err)
-	// }()
-
-	d, err = os.Open(p)
-	tst.ErrFatal(t, err)
-	tst.Htreqx(t, "GET", url, nil, func(rsp *http.Response) {
-		if rsp.StatusCode != http.StatusOK {
-			t.Fail()
-		}
-		b, err := ioutil.ReadAll(rsp.Body)
-		tst.ErrFatal(t, err)
-		var res []map[string]interface{}
-		err = json.Unmarshal(b, &res)
-		if err != nil || len(res) > 3 {
-			t.Fail()
-		}
-		for _, m := range res {
-			n, ok := m["name"].(string)
-			if !ok {
-				t.Fail()
-			}
-			switch n {
-			case "some0", "some1", "some2":
-				if !convert64(m, "modTime") || !convert64(m, "size") ||
-					!convert64(m, "accessTime") || !convert64(m, "changeTime") {
-					t.Fail()
-				}
-				if n == "some1" && !convertFm(m) {
-					t.Fail()
-				}
-				fi, err := os.Stat(path.Join(p, n))
-				tst.ErrFatal(t, err)
-				if !compareProperties(m, toPropertyMap(fi, n == "some1")) {
-					t.Fail()
-				}
-			default:
-				t.Fail()
-			}
 		}
 	})
 }
@@ -1952,7 +1690,7 @@ func TestPutf(t *testing.T) {
 }
 
 func TestPutfNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -2234,7 +1972,7 @@ func TestRenamef(t *testing.T) {
 }
 
 func TestRenamefNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -2337,7 +2075,7 @@ func TestDeletef(t *testing.T) {
 }
 
 func TestDeletefNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
@@ -2414,7 +2152,7 @@ func TestMkdirf(t *testing.T) {
 }
 
 func TestMkdirfNotRoot(t *testing.T) {
-	if share.IsRoot {
+	if tst.IsRoot {
 		t.Skip()
 	}
 
