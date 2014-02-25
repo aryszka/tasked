@@ -425,28 +425,6 @@ func TestParseOptions(t *testing.T) {
 	}
 }
 
-func TestValidateOptions(t *testing.T) {
-	o := new(options)
-	err := validateOptions(o)
-	if err != nil || o.root != "" {
-		t.Fail()
-	}
-	o = new(options)
-	o.root = "/some/path"
-	err = validateOptions(o)
-	if err != nil || o.root != "/some/path" {
-		t.Fail()
-	}
-	o = new(options)
-	o.root = "some/path"
-	wd, err := os.Getwd()
-	ErrFatal(t, err)
-	err = validateOptions(o)
-	if err != nil || o.root != path.Join(wd, "some/path") {
-		t.Fail()
-	}
-}
-
 func TestReadOptions(t *testing.T) {
 	defer func(sc, hk string, args []string, stderr *os.File) {
 		sysConfig = sc
@@ -548,12 +526,9 @@ func TestReadOptions(t *testing.T) {
 	RemoveIfExistsF(t, uhc)
 	RemoveIfExistsF(t, efa)
 	RemoveIfExistsF(t, ef)
-	wd, err := os.Getwd()
-	ErrFatal(t, err)
 	os.Args = []string{"tasked", cmdServe, "some/path"}
 	o, err = readOptions()
-	if err != nil || o.root != path.Join(wd, "some/path") {
-		t.Log(o.root)
+	if err != nil {
 		t.Fail()
 	}
 

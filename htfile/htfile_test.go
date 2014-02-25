@@ -302,28 +302,58 @@ func TestToPropertyMap(t *testing.T) {
 	}
 }
 
+func TestClearDirPath(t *testing.T) {
+	if cleanDirPath("") != "." {
+		t.Fail()
+	}
+	if cleanDirPath(".") != "." {
+		t.Fail()
+	}
+	if cleanDirPath("/") != "/" {
+		t.Fail()
+	}
+	if cleanDirPath("path") != "./path" {
+		t.Fail()
+	}
+	if cleanDirPath("/path") != "/path" {
+		t.Fail()
+	}
+	if cleanDirPath("some/path") != "./some/path" {
+		t.Fail()
+	}
+	if cleanDirPath("/some/path") != "/some/path" {
+		t.Fail()
+	}
+}
+
 func TestPathIntersect(t *testing.T) {
+	// current dir, file
+	s0, s1 := ".", "file"
+	if pathIntersect(s0, s1) != leftContains || pathIntersect(s1, s0) != rightContains {
+		t.Fail()
+	}
+
 	// equal length, not equal
-	s0, s1 := "some/one", "some/two"
-	if pathIntersect(s0, s1) != 0 || pathIntersect(s1, s0) != 0 {
+	s0, s1 = "some/one", "some/two"
+	if pathIntersect(s0, s1) != noMatch || pathIntersect(s1, s0) != noMatch {
 		t.Fail()
 	}
 
 	// equal length, equal
 	s0, s1 = "some/path", "some/path"
-	if pathIntersect(s0, s1) != 3 {
+	if pathIntersect(s0, s1) != samePath {
 		t.Fail()
 	}
 
 	// not equal length, not intersect
 	s0, s1 = "some/path", "some/pathbutdifferent"
-	if pathIntersect(s0, s1) != 0 || pathIntersect(s1, s0) != 0 {
+	if pathIntersect(s0, s1) != noMatch || pathIntersect(s1, s0) != noMatch {
 		t.Fail()
 	}
 
 	// not equal length, intersect
 	s0, s1 = "some/path", "some/path/inside"
-	if pathIntersect(s0, s1) != 2 || pathIntersect(s1, s0) != 1 {
+	if pathIntersect(s0, s1) != leftContains || pathIntersect(s1, s0) != rightContains {
 		t.Fail()
 	}
 }

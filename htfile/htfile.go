@@ -54,6 +54,15 @@ type Options interface {
 	MaxSearchResults() int
 }
 
+type pathMatch int
+
+const (
+	noMatch pathMatch = iota
+	rightContains
+	leftContains
+	samePath
+)
+
 var (
 	textMimeTypes = map[string]string{
 		"css":    "text/css; charset=utf-8",
@@ -97,20 +106,35 @@ func toPropertyMap(fi os.FileInfo, ext bool) map[string]interface{} {
 	return m
 }
 
-func pathIntersect(p0, p1 string) int {
+func cleanDirPath(p string) string {
+	p = path.Clean(p)
+	if path.IsAbs(p) {
+		return p
+	}
+	switch p {
+	case "", ".":
+		return "."
+	default:
+		return "./" + p
+	}
+}
+
+func pathIntersect(p0, p1 string) pathMatch {
+	p0 = cleanDirPath(p0)
+	p1 = cleanDirPath(p1)
 	if len(p0) == len(p1) {
 		if p0 == p1 {
-			return 3
+			return samePath
 		}
-		return 0
+		return noMatch
 	}
-	res := 1
+	res := rightContains
 	if len(p0) < len(p1) {
 		p0, p1 = p1, p0
-		res = 2
+		res = leftContains
 	}
 	if p0[:len(p1)] != p1 || p0[len(p1)] != '/' {
-		res = 0
+		res = noMatch
 	}
 	return res
 }
@@ -246,10 +270,10 @@ func getQryExpression(qry url.Values, key string) (*regexp.Regexp, error) {
 	return regexp.Compile(expr)
 }
 
-func (h *handler) getPath(sp string) (string, error) {
-	p := path.Join(h.dn, sp)
+func (h *handler) getPath(p string) (string, error) {
+	p = path.Join(h.dn, p)
 	i := pathIntersect(h.dn, p)
-	if i < 2 {
+	if i < leftContains {
 		return "", invalidPath
 	}
 	return p, nil
@@ -527,7 +551,7 @@ func (h *handler) copyRename(w http.ResponseWriter, r *http.Request,
 	for _, to := range tos {
 		to, err := h.getPath(to)
 		if !share.CheckHandle(w, err == nil, http.StatusNotFound) ||
-			!share.CheckBadReq(w, pathIntersect(from, to) == 0) {
+			!share.CheckBadReq(w, pathIntersect(from, to) == noMatch) {
 			return
 		}
 		err = f(from, to)

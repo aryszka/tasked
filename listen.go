@@ -45,6 +45,7 @@ var (
 	invalidAddress = errors.New("Invalid address.")
 )
 
+// net/url doesn't parse pure ip addresses
 func parseAddress(s string) (*address, error) {
 	m := addressRx.FindStringSubmatch(s)
 	if len(m) == 0 {
