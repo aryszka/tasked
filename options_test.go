@@ -425,6 +425,28 @@ func TestParseOptions(t *testing.T) {
 	}
 }
 
+func TestValidateOptions(t *testing.T) {
+	o := new(options)
+	err := validateOptions(o)
+	if err != nil || o.root != "" {
+		t.Fail()
+	}
+	o = new(options)
+	o.root = "/some/path"
+	err = validateOptions(o)
+	if err != nil || o.root != "/some/path" {
+		t.Fail()
+	}
+	o = new(options)
+	o.root = "some/path"
+	wd, err := os.Getwd()
+	ErrFatal(t, err)
+	err = validateOptions(o)
+	if err != nil || o.root != path.Join(wd, "some/path") {
+		t.Fail()
+	}
+}
+
 func TestReadOptions(t *testing.T) {
 	defer func(sc, hk string, args []string, stderr *os.File) {
 		sysConfig = sc
@@ -496,7 +518,7 @@ func TestReadOptions(t *testing.T) {
 	fakeStderr = path.Join(Testdir, "stderr")
 	WithNewFileF(t, fakeStderr, func(f *os.File) error {
 		os.Stderr = f
-		os.Args = []string{"tasked", cmdServe, "arg0", "arg1", "arg2"}
+		os.Args = []string{"tasked", cmdServe, "/arg0", "arg1", "arg2"}
 		_, err := readOptions()
 		if err != invalidArgs {
 			t.Fail()
@@ -514,10 +536,24 @@ func TestReadOptions(t *testing.T) {
 	RemoveIfExistsF(t, uhc)
 	RemoveIfExistsF(t, efa)
 	RemoveIfExistsF(t, ef)
-	os.Args = []string{"tasked", cmdServe, "arg0", "arg1"}
+	os.Args = []string{"tasked", cmdServe, "/arg0", "arg1"}
 	o, err = readOptions()
 	if err != nil || o.Command() != cmdServe ||
-		o.Root() != "arg0" || o.Address() != "arg1" {
+		o.Root() != "/arg0" || o.Address() != "arg1" {
+		t.Fail()
+	}
+
+	// validate
+	RemoveIfExistsF(t, sc)
+	RemoveIfExistsF(t, uhc)
+	RemoveIfExistsF(t, efa)
+	RemoveIfExistsF(t, ef)
+	wd, err := os.Getwd()
+	ErrFatal(t, err)
+	os.Args = []string{"tasked", cmdServe, "some/path"}
+	o, err = readOptions()
+	if err != nil || o.root != path.Join(wd, "some/path") {
+		t.Log(o.root)
 		t.Fail()
 	}
 

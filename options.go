@@ -380,6 +380,17 @@ func parseOptions(o *options, e []*keyval.Entry) error {
 	return nil
 }
 
+func validateOptions(o *options) error {
+	if o.root != "" && !path.IsAbs(o.root) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		o.root = path.Join(wd, o.root)
+	}
+	return nil
+}
+
 func readOptions() (*options, error) {
 	cmd, err := parseCommand()
 	if err != nil || cmd == cmdHelp {
@@ -409,6 +420,11 @@ func readOptions() (*options, error) {
 		return nil, err
 	}
 	err = parseOptions(o, e)
+	if err != nil {
+		printUsage()
+		return nil, err
+	}
+	err = validateOptions(o)
 	if err != nil {
 		printUsage()
 		return nil, err
