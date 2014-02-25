@@ -33,11 +33,19 @@ func runasUser(un string) error {
 	if err != nil {
 		return err
 	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return err
+	}
 	uid, err := strconv.Atoi(u.Uid)
 	if err != nil {
 		return err
 	}
-	return syscall.Setuid(uid)
+	if err = syscall.Setgid(gid); err != nil {
+		return err
+	} else {
+		return syscall.Setuid(uid)
+	}
 }
 
 func createHandler(o *options, a *auth.It) (http.Handler, *htproc.ProcFilter) {
