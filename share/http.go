@@ -12,28 +12,28 @@ import (
 )
 
 const (
-	CmdKey      = "cmd"
-	CmdProps    = "props"
-	CmdSearch   = "search"
-	CmdModprops = "modprops"
-	CmdDelete   = "delete"
-	CmdMkdir    = "mkdir"
-	CmdCopy     = "copy"
-	CmdRename   = "rename"
-	CmdAuth     = "auth"
-	CmdAll      = "all_"
+	HttpCmdKey      = "cmd"
+	HttpCmdProps    = "props"
+	HttpCmdSearch   = "search"
+	HttpCmdModprops = "modprops"
+	HttpCmdDelete   = "delete"
+	HttpCmdMkdir    = "mkdir"
+	HttpCmdCopy     = "copy"
+	HttpCmdRename   = "rename"
+	HttpCmdAuth     = "auth"
+	HttpCmdAll      = "all_"
 )
 
 var (
 	allCmds = []string{
-		CmdProps,
-		CmdSearch,
-		CmdModprops,
-		CmdDelete,
-		CmdMkdir,
-		CmdCopy,
-		CmdRename,
-		CmdAuth}
+		HttpCmdProps,
+		HttpCmdSearch,
+		HttpCmdModprops,
+		HttpCmdDelete,
+		HttpCmdMkdir,
+		HttpCmdCopy,
+		HttpCmdRename,
+		HttpCmdAuth}
 	HeaderContentType         = http.CanonicalHeaderKey("content-type")
 	HeaderContentLength       = http.CanonicalHeaderKey("content-length")
 	JsonContentType           = "application/json; charset=utf-8"

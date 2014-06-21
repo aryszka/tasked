@@ -120,8 +120,7 @@ func cleanDirPath(p string) string {
 }
 
 func pathIntersect(p0, p1 string) pathMatch {
-	p0 = cleanDirPath(p0)
-	p1 = cleanDirPath(p1)
+	p0, p1 = cleanDirPath(p0), cleanDirPath(p1)
 	if len(p0) == len(p1) {
 		if p0 == p1 {
 			return samePath
@@ -506,7 +505,7 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request, f *os.File, fi
 	if r.Method == "HEAD" {
 		return
 	}
-	io.Copy(w, f) // todo: diag log
+	io.Copy(w, f)
 }
 
 func (h *handler) putf(w http.ResponseWriter, r *http.Request) {
@@ -695,9 +694,6 @@ func (h *handler) post(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// todo:
-	// - document that the accept headers are simply ignored
-	// - document that the content-type for json requests is simply ignored
 	switch r.Method {
 	case "OPTIONS":
 		h.options(w, r)

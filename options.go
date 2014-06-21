@@ -113,7 +113,7 @@ type options struct {
 	tlsCertFile      string
 	maxSearchResults int
 	maxRequestBody   int64
-	maxRequestHeader int64
+	maxRequestHeader int
 	proxy            string
 	proxyFile        string
 
@@ -149,7 +149,7 @@ func (o *options) TlsKey() ([]byte, error)  { return fieldOrFile(o.tlsKey, o.tls
 func (o *options) TlsCert() ([]byte, error) { return fieldOrFile(o.tlsCert, o.tlsCertFile) }
 func (o *options) MaxSearchResults() int    { return o.maxSearchResults }
 func (o *options) MaxRequestBody() int64    { return o.maxRequestBody }
-func (o *options) MaxRequestHeader() int64  { return o.maxRequestHeader }
+func (o *options) MaxRequestHeader() int    { return o.maxRequestHeader }
 func (o *options) Proxy() string            { return o.proxy }
 
 func (o *options) Authenticate() bool      { return o.authenticate }
@@ -330,11 +330,11 @@ func parseOptions(o *options, e []*keyval.Entry) error {
 			}
 			o.maxRequestBody = v
 		case maxRequestHeaderKey:
-			v, err := strconv.ParseInt(ei.Val, 0, 64)
+			v, err := strconv.ParseInt(ei.Val, 0, 32)
 			if err != nil {
 				return err
 			}
-			o.maxRequestHeader = v
+			o.maxRequestHeader = int(v)
 		case proxyKey:
 			o.proxy = ei.Val
 		case proxyFileKey:

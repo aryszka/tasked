@@ -70,7 +70,12 @@ func (s *server) run(o *options, h http.Handler) error {
 		go func() { ep <- s.p.Run(nil) }()
 	}
 	es := make(chan error)
-	go func() { es <- http.Serve(s.l, h) }() // max header bytes needs to be set
+	go func() {
+		hs := new(http.Server)
+		hs.Handler = h
+		hs.MaxHeaderBytes = o.MaxRequestHeader()
+		es <- hs.Serve(s.l)
+	}()
 	select {
 	case err := <-ep:
 		Doretlog42(s.l.Close)

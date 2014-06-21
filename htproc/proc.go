@@ -45,7 +45,6 @@ const (
 var (
 	startupMessage   = []byte("ready")
 	command          = os.Args[0]
-	args             []string
 	procClosed       = errors.New("Process closed.")
 	unexpectedExit   = errors.New("Process exited unexpectedly.")
 	startupTimeouted = errors.New("Process startup timeouted.")
@@ -57,6 +56,17 @@ var (
 func newProc(address string, dialTimeout time.Duration) *proc {
 	p := new(proc)
 	p.cmd = exec.Command(command, append(args, "-sock", address)...)
+	/*
+	"serve -runas <user> -address <socket>\
+		-tls-key "" -tls-cert "" -tls-key-file "" -tls-cert-file ""
+		-cachedir "" -proxy "" -proxy-file ""
+		-authenticate false -public-user "" -token-validity 0
+		-aes-key "" -aes-iv "" -aes-key-file "" -aes-iv-file ""
+		-max-request-processes 0 -process-idle-time 0
+		-root <current> -allow-cookies <current>
+		-maxSearchResults <current> -maxRequestBody <current> -maxRequestHeader <current>
+	*/
+	args := [os.Args[0], 
 	p.proxy = &proxy{address: address, timeout: dialTimeout}
 	p.failure = make(chan int)
 	p.ready = make(chan int)

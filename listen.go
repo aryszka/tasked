@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"regexp"
 	"strconv"
 )
@@ -120,15 +119,7 @@ func listenTls(l net.Listener, a *address, o listenerOptions) (net.Listener, err
 				host = ip
 			}
 		}
-		cachedir := o.Cachedir()
-		if cachedir != "" {
-			cachedir = path.Join(cachedir, "p"+strconv.Itoa(os.Getpid()), "tls")
-			err = EnsureDir(cachedir)
-			if err != nil {
-				return nil, err
-			}
-		}
-		tlsKey, tlsCert, err = selfCert(host, cachedir)
+		tlsKey, tlsCert, err = selfCert(host, o.Cachedir())
 		if err != nil {
 			return nil, err
 		}
