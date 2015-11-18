@@ -1,7 +1,7 @@
 package main
 
 import (
-	. "code.google.com/p/tasked/share"
+	. "github.com/aryszka/tasked/share"
 	"crypto/tls"
 	"errors"
 	"fmt"

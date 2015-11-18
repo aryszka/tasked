@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	. "code.google.com/p/tasked/testing"
+	. "github.com/aryszka/tasked/testing"
 	"crypto/aes"
 	"crypto/rand"
 	"crypto/tls"

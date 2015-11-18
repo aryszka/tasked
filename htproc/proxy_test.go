@@ -2,7 +2,7 @@ package htproc
 
 import (
 	"bytes"
-	tst "code.google.com/p/tasked/testing"
+	tst "github.com/aryszka/tasked/testing"
 	"io/ioutil"
 	"net/http"
 	"path"

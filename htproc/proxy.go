@@ -1,8 +1,8 @@
 package htproc
 
 import (
-	"code.google.com/p/tasked/share"
-	. "code.google.com/p/tasked/share"
+	"github.com/aryszka/tasked/share"
+	. "github.com/aryszka/tasked/share"
 	"io"
 	"net"
 	"net/http"

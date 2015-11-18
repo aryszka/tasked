@@ -2,7 +2,7 @@ package share
 
 import (
 	"bytes"
-	tst "code.google.com/p/tasked/testing"
+	tst "github.com/aryszka/tasked/testing"
 	"encoding/json"
 	"errors"
 	"fmt"

@@ -1,7 +1,7 @@
 package share
 
 import (
-	tst "code.google.com/p/tasked/testing"
+	tst "github.com/aryszka/tasked/testing"
 	"os"
 	"path"
 	"testing"

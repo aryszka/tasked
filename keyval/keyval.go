@@ -2,7 +2,7 @@ package keyval
 
 import (
 	"bytes"
-	. "code.google.com/p/tasked/share"
+	. "github.com/aryszka/tasked/share"
 	"io"
 	"os"
 	"unicode"

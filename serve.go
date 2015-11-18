@@ -5,11 +5,11 @@ import (
 	"strconv"
 	"syscall"
 	"net/http"
-	"code.google.com/p/tasked/auth"
-	"code.google.com/p/tasked/htfile"
-	"code.google.com/p/tasked/htproc"
-	"code.google.com/p/tasked/htauth"
-	. "code.google.com/p/tasked/share"
+	"github.com/aryszka/tasked/auth"
+	"github.com/aryszka/tasked/htfile"
+	"github.com/aryszka/tasked/htproc"
+	"github.com/aryszka/tasked/htauth"
+	. "github.com/aryszka/tasked/share"
 	"net"
 )
 

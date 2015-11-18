@@ -55,6 +55,7 @@ var (
 
 func newProc(address string, dialTimeout time.Duration) *proc {
 	p := new(proc)
+	args := os.Args[1:]
 	p.cmd = exec.Command(command, append(args, "-sock", address)...)
 	/*
 	"serve -runas <user> -address <socket>\
@@ -66,7 +67,6 @@ func newProc(address string, dialTimeout time.Duration) *proc {
 		-root <current> -allow-cookies <current>
 		-maxSearchResults <current> -maxRequestBody <current> -maxRequestHeader <current>
 	*/
-	args := [os.Args[0], 
 	p.proxy = &proxy{address: address, timeout: dialTimeout}
 	p.failure = make(chan int)
 	p.ready = make(chan int)

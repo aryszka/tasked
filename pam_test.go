@@ -1,10 +1,10 @@
 package main
 
 import (
-	tst "code.google.com/p/tasked/testing"
+	tst "github.com/aryszka/tasked/testing"
 	"testing"
 	"path"
-	. "code.google.com/p/tasked/testing"
+	. "github.com/aryszka/tasked/testing"
 	"io"
 	"crypto/rand"
 	"crypto/aes"

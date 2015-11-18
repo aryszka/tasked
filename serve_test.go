@@ -5,11 +5,11 @@ package main
 import (
 	"testing"
 	"path"
-	. "code.google.com/p/tasked/testing"
+	. "github.com/aryszka/tasked/testing"
 	"time"
-	"code.google.com/p/tasked/auth"
+	"github.com/aryszka/tasked/auth"
 	"net/http"
-	"code.google.com/p/tasked/htproc"
+	"github.com/aryszka/tasked/htproc"
 	"net"
 )
 

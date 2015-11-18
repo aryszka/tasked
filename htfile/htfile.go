@@ -2,7 +2,7 @@ package htfile
 
 import (
 	"bufio"
-	"code.google.com/p/tasked/share"
+	"github.com/aryszka/tasked/share"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -635,14 +635,14 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 	if !share.CheckBadReq(w, err == nil) {
 		return
 	}
-	cmd, ok := share.CheckQryValuesCmd(w, qry, share.CmdProps, share.CmdSearch)
+	cmd, ok := share.CheckQryValuesCmd(w, qry, share.HttpCmdProps, share.HttpCmdSearch)
 	if !ok {
 		return
 	}
 	switch cmd {
-	case share.CmdProps:
+	case share.HttpCmdProps:
 		h.propsf(w, r)
-	case share.CmdSearch:
+	case share.HttpCmdSearch:
 		h.searchf(w, r, qry)
 	default:
 		p, err := h.getPath(r.URL.Path)
@@ -673,20 +673,20 @@ func (h *handler) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cmd, ok := share.CheckQryValuesCmd(w, qry,
-		share.CmdModprops, share.CmdDelete, share.CmdMkdir, share.CmdCopy, share.CmdRename)
+		share.HttpCmdModprops, share.HttpCmdDelete, share.HttpCmdMkdir, share.HttpCmdCopy, share.HttpCmdRename)
 	if !ok {
 		return
 	}
 	switch cmd {
-	case share.CmdModprops:
+	case share.HttpCmdModprops:
 		h.modpropsf(w, r)
-	case share.CmdDelete:
+	case share.HttpCmdDelete:
 		h.deletef(w, r)
-	case share.CmdMkdir:
+	case share.HttpCmdMkdir:
 		h.mkdirf(w, r)
-	case share.CmdCopy:
+	case share.HttpCmdCopy:
 		h.copyf(w, r, qry)
-	case share.CmdRename:
+	case share.HttpCmdRename:
 		h.renamef(w, r, qry)
 	default:
 		h.putf(w, r)

@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
-	"code.google.com/p/tasked/keyval"
-	. "code.google.com/p/tasked/testing"
+	"github.com/aryszka/tasked/keyval"
+	. "github.com/aryszka/tasked/testing"
 	"flag"
 	"fmt"
 	"io/ioutil"

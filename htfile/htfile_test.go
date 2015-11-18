@@ -4,8 +4,8 @@ package htfile
 
 import (
 	"bytes"
-	"code.google.com/p/tasked/share"
-	tst "code.google.com/p/tasked/testing"
+	"github.com/aryszka/tasked/share"
+	tst "github.com/aryszka/tasked/testing"
 	"crypto/rand"
 	"encoding/json"
 	"errors"

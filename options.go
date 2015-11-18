@@ -1,7 +1,7 @@
 package main
 
 import (
-	"code.google.com/p/tasked/keyval"
+	"github.com/aryszka/tasked/keyval"
 	"errors"
 	"flag"
 	"fmt"

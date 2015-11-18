@@ -2,7 +2,7 @@ package htauth
 
 import (
 	"bytes"
-	"code.google.com/p/tasked/share"
+	"github.com/aryszka/tasked/share"
 	"encoding/base64"
 	"errors"
 	"mime"
@@ -62,7 +62,7 @@ func New(a Auth, o Options) share.HttpFilter {
 }
 
 func isAuthRequest(r *http.Request) (bool, error) {
-	cmd, err := share.GetQryCmd(r, share.CmdAll)
+	cmd, err := share.GetQryCmd(r, share.HttpCmdAll)
 	if err != nil {
 		return false, err
 	}
@@ -73,9 +73,9 @@ func isAuthRequest(r *http.Request) (bool, error) {
 		}
 		return true, nil
 	case "GET", "POST":
-		return cmd == share.CmdAuth, nil
+		return cmd == share.HttpCmdAuth, nil
 	default:
-		if cmd == share.CmdAuth {
+		if cmd == share.HttpCmdAuth {
 			return false, noAuthWithThisMethod
 		}
 		return false, nil

@@ -2,7 +2,7 @@ package htproc
 
 import (
 	"bytes"
-	. "code.google.com/p/tasked/testing"
+	. "github.com/aryszka/tasked/testing"
 	"flag"
 	"fmt"
 	"io/ioutil"

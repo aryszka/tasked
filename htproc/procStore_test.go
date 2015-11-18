@@ -1,7 +1,7 @@
 package htproc
 
 import (
-	. "code.google.com/p/tasked/testing"
+	. "github.com/aryszka/tasked/testing"
 	"errors"
 	"strings"
 	"testing"

@@ -117,7 +117,7 @@ func (mr *MaxReader) Read(b []byte) (n int, err error) {
 }
 
 func GetQryValuesCmd(qry url.Values, allowed ...string) (string, error) {
-	if len(allowed) > 0 && allowed[0] == CmdAll {
+	if len(allowed) > 0 && allowed[0] == HttpCmdAll {
 		if len(allowed) == 1 {
 			allowed = allCmds
 		} else {
@@ -137,7 +137,7 @@ func GetQryValuesCmd(qry url.Values, allowed ...string) (string, error) {
 			allowed = filtered
 		}
 	}
-	cmds := qry[CmdKey]
+	cmds := qry[HttpCmdKey]
 	for _, cmd := range cmds {
 		found := false
 		for _, ac := range allowed {

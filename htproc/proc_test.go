@@ -6,7 +6,7 @@ import (
 	"io"
 	"os/exec"
 	// "syscall"
-	. "code.google.com/p/tasked/testing"
+	. "github.com/aryszka/tasked/testing"
 	"fmt"
 	"net/http"
 	"testing"

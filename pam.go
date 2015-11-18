@@ -2,7 +2,7 @@ package main
 
 import (
 	pam "code.google.com/p/gopam"
-	"code.google.com/p/tasked/auth"
+	"github.com/aryszka/tasked/auth"
 )
 
 type authOptions struct {
